@@ -24,12 +24,8 @@ export interface PackagingConfig {
 }
 
 function readRedisConfig(): RedisConfig | undefined {
-  const url = process.env.REDIS_URL;
-  if (!url) {
-    return undefined;
-  }
   return {
-    url,
+    url: process.env.REDIS_URL || 'redis://localhost:6379',
     queueName: process.env.REDIS_QUEUE_NAME || 'packaging-queue'
   };
 }

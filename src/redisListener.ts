@@ -37,10 +37,16 @@ export class RedisListener {
       try {
         await this.connect();
         if (this.noProcessing < this.concurrency) {
-          const message = await this.client?.bzPopMin(
-            this.redisConfig.queueName,
-            2000
-          );
+          let message;
+          try {
+            message = await this.client?.bzPopMin(
+              this.redisConfig.queueName,
+              2000
+            );
+            console.log(message);
+          } catch (err) {
+            console.error(err);
+          }
           if (message) {
             this.handleMessage(message.value);
           }
@@ -48,7 +54,7 @@ export class RedisListener {
           await delay(1000);
         }
       } catch (err) {
-        console.error('Error when polling queue', err);
+        console.error('Error when processing queue', err);
         await delay(3000);
       }
     }
@@ -83,12 +89,23 @@ export class RedisListener {
       return;
     }
     this.client = await createClient({ url: this.redisConfig.url })
-      .on('error', (err) => console.log('Redis Client Error', err))
+      .on('error', (err) => {
+        console.log('Redis Client Error', err);
+        this.redisUp = false;
+      })
       .connect();
+    this.redisUp = true;
   }
 
   async disconnect() {
-    await this.client?.disconnect();
+    await this.client?.quit();
     this.client = undefined;
+  }
+
+  redisStatus(): 'UP' | 'DOWN' {
+    if (!this.client) {
+      return 'UP';
+    }
+    return this.client.isReady ? 'UP' : 'DOWN';
   }
 }

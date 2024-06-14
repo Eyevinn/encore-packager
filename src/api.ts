@@ -1,26 +1,42 @@
-import fastify from 'fastify';
+import fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Static, Type } from '@sinclair/typebox';
 import { FastifyPluginCallback } from 'fastify';
 
 const Health = Type.Object({
-  status: Type.String()
+  status: Type.String(),
+  redis: Type.Object({
+    status: Type.String()
+  })
 });
 
-const healthcheck: FastifyPluginCallback<never> = (fastify, opts, next) => {
+interface HealthcheckOptions {
+  redisStatus: () => 'UP' | 'DOWN';
+}
+
+const healthcheck: FastifyPluginCallback<HealthcheckOptions> = (
+  fastify,
+  opts,
+  next
+) => {
   fastify.get<{ Reply: Static<typeof Health> }>(
     '/healthcheck',
     {
       schema: {
-        description: 'Healthcheck endpoint',
         response: {
           200: Health
         }
       }
     },
     async (_, reply) => {
-      reply.send({ status: 'up' });
+      const status = opts.redisStatus();
+      reply.code(status === 'UP' ? 200 : 503).send({
+        status: status,
+        redis: {
+          status
+        }
+      });
     }
   );
   next();
@@ -30,7 +46,7 @@ export interface ApiOptions {
   title: string;
 }
 
-export default () => {
+export default (opts: HealthcheckOptions) => {
   const api = fastify({
     ignoreTrailingSlash: true
   }).withTypeProvider<TypeBoxTypeProvider>();
@@ -38,7 +54,7 @@ export default () => {
   // register the cors plugin, configure it for better security
   api.register(cors);
 
-  api.register(healthcheck, null as never);
+  api.register(healthcheck, opts);
   // register other API routes here
 
   return api;
