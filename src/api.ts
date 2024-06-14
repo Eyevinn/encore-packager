@@ -6,27 +6,23 @@ import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Static, Type } from '@sinclair/typebox';
 import { FastifyPluginCallback } from 'fastify';
 
-const HelloWorld = Type.String({
-  description: 'The magical words!'
+const Health = Type.Object({
+  status: Type.String()
 });
 
-export interface HealthcheckOptions {
-  title: string;
-}
-
-const healthcheck: FastifyPluginCallback<HealthcheckOptions> = (fastify, opts, next) => {
-  fastify.get<{ Reply: Static<typeof HelloWorld> }>(
-    '/',
+const healthcheck: FastifyPluginCallback<never> = (fastify, opts, next) => {
+  fastify.get<{ Reply: Static<typeof Health> }>(
+    '/healthcheck',
     {
       schema: {
-        description: 'Say hello',
+        description: 'Healthcheck endpoint',
         response: {
-          200: HelloWorld
+          200: Health
         }
       }
     },
     async (_, reply) => {
-      reply.send('Hello, world! I am ' + opts.title);
+      reply.send({ status: 'up' });
     }
   );
   next();
@@ -58,8 +54,8 @@ export default (opts: ApiOptions) => {
     routePrefix: '/docs'
   });
 
-  api.register(healthcheck, { title: opts.title });
+  api.register(healthcheck, {});
   // register other API routes here
 
   return api;
-}
+};

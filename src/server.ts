@@ -1,14 +1,25 @@
 import api from './api';
+import { readConfig } from './config';
+import { RedisListener } from './redisListener';
+import { packageEncoreJob } from './package';
 
-const server = api({ title: '@eyevinn/typescript-nodejs' });
+const config = readConfig();
 
-const PORT = process.env.PORT ? Number(process.env.PORT) : 8000;
+const server = api({ title: 'encore packager' });
 
-server.listen({ port: PORT, host: '0.0.0.0' }, (err, address) => {
+server.listen({ port: config.port, host: config.host }, (err, address) => {
   if (err) {
     throw err;
   }
   console.log(`Server listening on ${address}`);
 });
+
+if (config.redis) {
+  console.log('Starting redis listener');
+  const redisListener = new RedisListener(config.redis, (message) => {
+    return packageEncoreJob(message.url, config.package.outputFolder);
+  });
+  redisListener.start();
+}
 
 export default server;
