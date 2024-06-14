@@ -1,4 +1,4 @@
-import fastify, { FastifyInstance } from 'fastify';
+import fastify from 'fastify';
 import cors from '@fastify/cors';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Static, Type } from '@sinclair/typebox';

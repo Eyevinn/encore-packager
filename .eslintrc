@@ -4,6 +4,7 @@
     "node": true,
     "browser": true
   },
+  "ignorePatterns": ["dist/*"],
   "extends": [
     "eslint:recommended",
     "plugin:@typescript-eslint/recommended",

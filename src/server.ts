@@ -7,7 +7,7 @@ export function startListener(config: Config) {
   const encorePackager = new EncorePackager(config.packaging);
   console.log('Starting redis listener');
   const redisListener = new RedisListener(
-    config.redis!,
+    config.redis,
     (message) => {
       return encorePackager.package(message.url);
     },

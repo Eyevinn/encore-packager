@@ -14,7 +14,7 @@ cli
     '-r, --redis-listener [redisListener]',
     'Run in service mode, listening to redis queue for jobs'
   )
-  .action(async (options, command) => {
+  .action(async (options) => {
     if (options.redisListener) {
       if (options.url) {
         console.warn('Ignoring URL option when running in service mode');

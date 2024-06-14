@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 
 export interface Config {
   healthcheck: HealthCheckConfig;
-  redis?: RedisConfig;
+  redis: RedisConfig;
   packaging: PackagingConfig;
 }
 
@@ -23,7 +23,7 @@ export interface PackagingConfig {
   shakaExecutable?: string;
 }
 
-function readRedisConfig(): RedisConfig | undefined {
+function readRedisConfig(): RedisConfig {
   return {
     url: process.env.REDIS_URL || 'redis://localhost:6379',
     queueName: process.env.REDIS_QUEUE_NAME || 'packaging-queue'
