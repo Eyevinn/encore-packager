@@ -1,15 +1,15 @@
 import { resolve } from 'node:path';
 
 export interface Config {
-  host: string;
-  port: number;
+  healthcheck: HealthCheckConfig;
   redis?: RedisConfig;
-  encore: EncoreConfig;
-  package: PackageConfig;
+  packaging: PackagingConfig;
 }
 
-export interface EncoreConfig {
-  url: string;
+export interface HealthCheckConfig {
+  host: string;
+  port: number;
+  disabled: boolean;
 }
 
 export interface RedisConfig {
@@ -17,25 +17,35 @@ export interface RedisConfig {
   queueName: string;
 }
 
-export interface PackageConfig {
+export interface PackagingConfig {
   outputFolder: string;
+  concurrency: number;
+  shakaExecutable?: string;
+}
+
+function readRedisConfig(): RedisConfig | undefined {
+  const url = process.env.REDIS_URL;
+  if (!url) {
+    return undefined;
+  }
+  return {
+    url,
+    queueName: process.env.REDIS_QUEUE_NAME || 'packaging-queue'
+  };
 }
 
 export function readConfig(): Config {
   return {
-    host: process.env.HOST || 'localhost',
-    port: parseInt(process.env.PORT || '8000'),
-    redis: !process.env.REDIS_URL
-      ? undefined
-      : {
-          url: process.env.REDIS_URL || '',
-          queueName: process.env.REDIS_QUEUE_NAME || 'packaging-queue'
-        },
-    encore: {
-      url: process.env.ENCORE_URL || ''
+    healthcheck: {
+      host: process.env.HOST || '0.0.0.0',
+      port: parseInt(process.env.PORT || '8000'),
+      disabled: process.env.DISABLE_HEALTHCHECK === 'true'
     },
-    package: {
-      outputFolder: resolve(process.env.PACKAGE_OUTPUT_FOLDER || 'out')
+    redis: readRedisConfig(),
+    packaging: {
+      outputFolder: resolve(process.env.PACKAGE_OUTPUT_FOLDER || 'packaged'),
+      shakaExecutable: process.env.SHAKA_PACKAGER_EXECUTABLE,
+      concurrency: parseInt(process.env.PACKAGE_CONCURRENCY || '1')
     }
   };
 }

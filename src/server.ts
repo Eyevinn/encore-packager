@@ -1,7 +1,7 @@
 import api from './api';
 import { readConfig } from './config';
 import { RedisListener } from './redisListener';
-import { packageEncoreJob } from './package';
+import { EncorePackager } from './encorePackager';
 
 const config = readConfig();
 
@@ -14,12 +14,15 @@ server.listen({ port: config.port, host: config.host }, (err, address) => {
   console.log(`Server listening on ${address}`);
 });
 
-if (config.redis) {
-  console.log('Starting redis listener');
-  const redisListener = new RedisListener(config.redis, (message) => {
-    return packageEncoreJob(message.url, config.package.outputFolder);
-  });
-  redisListener.start();
-}
+const encorePackager = new EncorePackager(config.packaging);
+console.log('Starting redis listener');
+const redisListener = new RedisListener(
+  config.redis!,
+  (message) => {
+    return encorePackager.package(message.url);
+  },
+  config.packaging.concurrency
+);
+redisListener.start();
 
 export default server;

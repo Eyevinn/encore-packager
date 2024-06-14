@@ -1,7 +1,24 @@
 import { RedisConfig } from './config';
 import { createClient } from 'redis';
-import { QueueMessage, validateQueueMessage } from './model';
 import { delay } from './util';
+import { Static, Type } from '@sinclair/typebox';
+import { TypeCompiler } from '@sinclair/typebox/compiler';
+
+export const QueueMessage = Type.Object({
+  jobId: Type.String(),
+  url: Type.String()
+});
+
+export type QueueMessage = Static<typeof QueueMessage>;
+
+const QueueMessageChecker = TypeCompiler.Compile(QueueMessage);
+
+export function validateQueueMessage(message: unknown) {
+  if (!QueueMessageChecker.Check(message)) {
+    const errors = QueueMessageChecker.Errors(message);
+    throw new Error(`Invalid message: ${errors}`);
+  }
+}
 
 export class RedisListener {
   private running = false;
@@ -15,12 +32,12 @@ export class RedisListener {
   ) {}
 
   async start() {
-    await this.connect();
     this.running = true;
     while (this.running) {
       try {
+        await this.connect();
         if (this.noProcessing < this.concurrency) {
-          const message = await this.client.bzPopMin(
+          const message = await this.client?.bzPopMin(
             this.redisConfig.queueName,
             2000
           );
@@ -32,6 +49,7 @@ export class RedisListener {
         }
       } catch (err) {
         console.error('Error when polling queue', err);
+        await delay(3000);
       }
     }
   }

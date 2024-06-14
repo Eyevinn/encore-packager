@@ -1,7 +1,5 @@
 import fastify from 'fastify';
 import cors from '@fastify/cors';
-import swagger from '@fastify/swagger';
-import swaggerUI from '@fastify/swagger-ui';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Static, Type } from '@sinclair/typebox';
 import { FastifyPluginCallback } from 'fastify';
@@ -32,7 +30,7 @@ export interface ApiOptions {
   title: string;
 }
 
-export default (opts: ApiOptions) => {
+export default () => {
   const api = fastify({
     ignoreTrailingSlash: true
   }).withTypeProvider<TypeBoxTypeProvider>();
@@ -40,21 +38,7 @@ export default (opts: ApiOptions) => {
   // register the cors plugin, configure it for better security
   api.register(cors);
 
-  // register the swagger plugins, it will automagically do magic
-  api.register(swagger, {
-    swagger: {
-      info: {
-        title: opts.title,
-        description: 'hello',
-        version: 'v1'
-      }
-    }
-  });
-  api.register(swaggerUI, {
-    routePrefix: '/docs'
-  });
-
-  api.register(healthcheck, {});
+  api.register(healthcheck, null as never);
   // register other API routes here
 
   return api;
