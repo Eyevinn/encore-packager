@@ -1,4 +1,36 @@
-# {{Name}}
+# Encore packager
+
+Wrapper for packaging output of an [encore](https://github.com/svt/encore) transcoding job with Shaka Packager.
+
+Kan be run either as a CLI or as a service. In the latter case it will listen for messages on a redis queue and
+package the output of the transcoding job referenced by the message.
+
+## Requirements
+[shaka packager](https://github.com/shaka-project/shaka-packager) needs to be installed. Unless the shaka executable is named `packager` and is in `PATH`, the path to the executable must be provided as an environment variable `SHAKA_PACKAGER_EXECUTABLE`.
+
+## Usage
+
+### CLI
+
+### Running as a service
+
+#### Environment variables
+
+| Variable | Description                                                | Default value            |
+| --- |------------------------------------------------------------|--------------------------|
+| `REDIS_URL` | URL to the redis server                                    | `redis://localhost:6379` |
+| `REDIS_QUEUE` | Name of the redis queue to listen to                       | `packaging-queue`        |
+| `HOST` | Hostname or IP address to bind to for healtchechk endpoint | `0.0.0.0`                |
+| `PORT` | Port to bind to for healtchechk endpoint                    | `8000`                   |
+| `DISABLE_HEALTCHECK` | Disable the healthcheck endpoint                           | `false`                  |
+| `SHAKA_PACKAGER_EXECUTABLE` | Path to the shaka packager executable                  | `packager`               |
+| `PACKAGE_OUTPUT_FOLDER` | Base folder for output, actual output will be in a subfolder named from the job id | `packaged`               |
+| `PACKAGE_CONCURRENCY` | Number of concurrent packaging jobs                       | `1`                      |
+
+```bash
+npm run start
+```
+
 
 <!--
 
