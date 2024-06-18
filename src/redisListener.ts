@@ -80,7 +80,9 @@ export class RedisListener {
         this.noProcessing--;
       }
     } catch (e) {
-      console.log(`Error when handling message: ${message}`);
+      console.error(
+        `Error when handling message ${message}: ${(e as Error)?.message}`
+      );
     }
   }
 
@@ -91,10 +93,8 @@ export class RedisListener {
     this.client = await createClient({ url: this.redisConfig.url })
       .on('error', (err) => {
         console.log('Redis Client Error', err);
-        this.redisUp = false;
       })
       .connect();
-    this.redisUp = true;
   }
 
   async disconnect() {

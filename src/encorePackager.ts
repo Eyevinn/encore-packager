@@ -22,7 +22,7 @@ export class EncorePackager {
 
   async package(jobUrl: string) {
     const job = await this.getEncoreJob(jobUrl);
-    const inputs = this.parseInputsFromEncoreJob(job);
+    const inputs = parseInputsFromEncoreJob(job);
     const dest = resolve(this.config.outputFolder, job.id);
     await doPackage({
       dest,
@@ -30,6 +30,7 @@ export class EncorePackager {
       noImplicitAudio: true,
       shakaExecutable: this.config.shakaExecutable
     } as PackageOptions);
+    console.log(`Finished packaging of job ${job.id} to output folder ${dest}`);
   }
 
   async getEncoreJob(url: string): Promise<EncoreJob> {
@@ -41,53 +42,56 @@ export class EncorePackager {
     }
     return (await response.json()) as EncoreJob;
   }
+}
 
-  private parseInputsFromEncoreJob(job: EncoreJob) {
-    const inputs: Input[] = [];
+export function parseInputsFromEncoreJob(job: EncoreJob) {
+  const inputs: Input[] = [];
 
-    if (job.status !== 'SUCCESSFUL') {
-      throw new Error('Encore job is not successful');
-    }
-    if (!job.output) {
-      throw new Error('Encore job has no output');
-    }
-    const video = job.output
-      .filter((output) => output.type === 'VideoFile')
-      .map((output) => ({ output, videoStream: output.videoStreams?.[0] }));
-    const audio = job.output
-      .filter((output) => output.type === 'AudioFile')
-      .map((output) => ({ output, audioStream: output.audioStreams?.[0] }))
-      .filter((v) => v.audioStream?.channels === 2);
-
-    if (audio.length === 0) {
-      const moreAudio = job.output
-        .filter((output) => output.type === 'VideoFile')
-        .filter(
-          (output) =>
-            output.audioStreams?.filter((a) => a.channels === 2)?.length ||
-            0 > 0
-        )
-        .map((output) => ({
-          output,
-          audioStream: output.audioStreams?.filter((a) => a.channels === 2)[0]
-        }));
-      if (moreAudio.length > 0) {
-        audio.push(moreAudio[0]);
-      }
-    }
-    let videoIdx = 0;
-    video.forEach((v) => {
-      const bitrateKb = v.videoStream?.bitrate
-        ? Math.round(v.videoStream?.bitrate / 1000)
-        : 0;
-      const key = `${videoIdx++}_${bitrateKb}`;
-      inputs.push({ type: 'video', key, filename: v.output.file });
-    });
-    let audioIdx = 0;
-    audio.forEach((audio) => {
-      const key = `${audioIdx++}`;
-      inputs.push({ type: 'audio', key, filename: audio.output.file });
-    });
-    return inputs;
+  if (job.status !== 'SUCCESSFUL') {
+    throw new Error('Encore job is not successful');
   }
+  if (!job.output) {
+    throw new Error('Encore job has no output');
+  }
+  const video = job.output
+    .filter((output) => output.type === 'VideoFile')
+    .map((output) => ({ output, videoStream: output.videoStreams?.[0] }));
+  const audio = job.output
+    .filter((output) => output.type === 'AudioFile')
+    .map((output) => ({ output, audioStream: output.audioStreams?.[0] }))
+    .filter((v) => v.audioStream?.channels === 2);
+
+  if (audio.length === 0) {
+    const moreAudio = job.output
+      .filter((output) => output.type === 'VideoFile')
+      .filter(hasStereoAudioStream)
+      .map((output) => ({
+        output,
+        audioStream: output.audioStreams?.filter((a) => a.channels === 2)[0]
+      }));
+    if (moreAudio.length > 0) {
+      audio.push(moreAudio[0]);
+    }
+  }
+  let videoIdx = 0;
+  video.forEach((v) => {
+    const bitrateKb = v.videoStream?.bitrate
+      ? Math.round(v.videoStream?.bitrate / 1000)
+      : 0;
+    const key = `${videoIdx++}_${bitrateKb}`;
+    inputs.push({ type: 'video', key, filename: v.output.file });
+  });
+  let audioIdx = 0;
+  audio.forEach((audio) => {
+    const key = `${audioIdx++}`;
+    inputs.push({ type: 'audio', key, filename: audio.output.file });
+  });
+  return inputs;
+}
+
+function hasStereoAudioStream(output: Output) {
+  if (!output.audioStreams || output.audioStreams.length === 0) {
+    return false;
+  }
+  return output.audioStreams.filter((a) => a.channels === 2).length > 0;
 }
