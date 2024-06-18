@@ -12,4 +12,5 @@ COPY --chown=node:node ["src", "./src"]
 # Delete prepare script to avoid errors from husky
 RUN npm pkg delete scripts.prepare \
     && npm ci --omit=dev
-CMD [ "npm", "run", "start" ]
+COPY --from=google/shaka-packager:v3.2.0 /usr/bin/packager /usr/bin/packager
+CMD [ "npm", "run", "start", "--", "-r" ]
