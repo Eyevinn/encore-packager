@@ -1,6 +1,6 @@
 {
   "name": "@eyevinn/encore-packager",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "The default typescript-nodejs template for eyevinn projects",
   "bin": {
     "encore-packager": "./dist/cli.js"
@@ -13,7 +13,8 @@
     "pretty": "prettier --check --ignore-unknown .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "dev": "nodemon",
-    "start": "ts-node -T src/cli.ts"
+    "start": "ts-node -T src/cli.ts",
+    "postversion": "git push && git push --tags"
   },
   "license": "MIT",
   "engines": {
