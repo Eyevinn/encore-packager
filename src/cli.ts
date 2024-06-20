@@ -19,7 +19,7 @@ cli
       if (options.url) {
         console.warn('Ignoring URL option when running in service mode');
       }
-      startListener(readConfig());
+      await startListener(readConfig());
     } else {
       if (!options.url) {
         cli.help();

@@ -17,19 +17,39 @@ package the output of the transcoding job referenced by the message.
 
 #### Environment variables
 
-| Variable                    | Description                                                                        | Default value            |
-| --------------------------- | ---------------------------------------------------------------------------------- | ------------------------ |
-| `REDIS_URL`                 | URL to the redis server                                                            | `redis://localhost:6379` |
-| `REDIS_QUEUE`               | Name of the redis queue to listen to                                               | `packaging-queue`        |
-| `HOST`                      | Hostname or IP address to bind to for healtchechk endpoint                         | `0.0.0.0`                |
-| `PORT`                      | Port to bind to for healtchechk endpoint                                           | `8000`                   |
-| `DISABLE_HEALTCHECK`        | Disable the healthcheck endpoint                                                   | `false`                  |
-| `SHAKA_PACKAGER_EXECUTABLE` | Path to the shaka packager executable                                              | `packager`               |
-| `PACKAGE_OUTPUT_FOLDER`     | Base folder for output, actual output will be in a subfolder named from the job id | `packaged`               |
-| `PACKAGE_CONCURRENCY`       | Number of concurrent packaging jobs                                                | `1`                      |
+| Variable                    | Description                                                                                    | Default value            |
+| --------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------ |
+| `REDIS_URL`                 | URL to the redis server                                                                        | `redis://localhost:6379` |
+| `REDIS_QUEUE`               | Name of the redis queue to listen to                                                           | `packaging-queue`        |
+| `HOST`                      | Hostname or IP address to bind to for healtchechk endpoint                                     | `0.0.0.0`                |
+| `PORT`                      | Port to bind to for healtchechk endpoint                                                       | `8000`                   |
+| `DISABLE_HEALTCHECK`        | Disable the healthcheck endpoint                                                               | `false`                  |
+| `SHAKA_PACKAGER_EXECUTABLE` | Path to the shaka packager executable                                                          | `packager`               |
+| `PACKAGE_OUTPUT_FOLDER`     | Base folder for output, actual output will be in a subfolder named from the job id             | `packaged`               |
+| `PACKAGE_CONCURRENCY`       | Number of concurrent packaging jobs                                                            | `1`                      |
+| `PACKAGE_LISTENER_PLUGIN`   | Optional path to a javascript file containing a custom listener for packaging event, see below |                          |
 
 ```bash
 npm run start
+```
+
+### Custom packager listener
+
+To implement a custom listener that reacts to package events, provide a path to a javascript file
+in the `PACKAGE_LISTENER_PLUGIN` environment variable. Example file below, not all methods need to be defined.
+
+```javascript
+export function onPackageDone(url) {
+  console.log(`Package done: ${url}`);
+}
+
+export function onPackageFail(msg, err) {
+  console.log(`Package fail: ${msg}, ${err.message}`);
+}
+
+export function onPackageStart(url) {
+  console.log(`Package start: ${url}`);
+}
 ```
 
 <!--

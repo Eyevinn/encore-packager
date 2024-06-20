@@ -3,6 +3,7 @@ import { createClient } from 'redis';
 import { delay } from './util';
 import { Static, Type } from '@sinclair/typebox';
 import { TypeCompiler } from '@sinclair/typebox/compiler';
+import { PackageListener } from './packageListener';
 
 export const QueueMessage = Type.Object({
   jobId: Type.String(),
@@ -28,7 +29,8 @@ export class RedisListener {
   constructor(
     private redisConfig: RedisConfig,
     private onMessage: (message: QueueMessage) => Promise<void>,
-    private concurrency: number = 1
+    private concurrency: number = 1,
+    private packageListener?: PackageListener
   ) {}
 
   async start() {
@@ -75,7 +77,9 @@ export class RedisListener {
         console.log(
           `Sending message for processing, currently processing ${this.noProcessing} messages`
         );
+        this.onPackageStart(parsedMessage.url);
         await this.onMessage(parsedMessage);
+        this.onPackageDone(parsedMessage.url);
       } finally {
         this.noProcessing--;
       }
@@ -83,6 +87,7 @@ export class RedisListener {
       console.error(
         `Error when handling message ${message}: ${(e as Error)?.message}`
       );
+      this.onPackageFail(message, e);
     }
   }
 
@@ -107,5 +112,34 @@ export class RedisListener {
       return 'UP';
     }
     return this.client.isReady ? 'UP' : 'DOWN';
+  }
+
+  onPackageStart(jobUrl: string) {
+    try {
+      this.packageListener?.onPackageStart?.(jobUrl);
+    } catch (err) {
+      console.warn(
+        `Error when calling beforePackage: ${(err as Error).message}`
+      );
+    }
+  }
+
+  onPackageDone(jobUrl: string) {
+    try {
+      this.packageListener?.onPackageDone?.(jobUrl);
+    } catch (err) {
+      console.warn(
+        `Error when calling onPackageDone: ${(err as Error).message}`
+      );
+    }
+  }
+
+  //eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onPackageFail(message: string, err: any) {
+    try {
+      this.packageListener?.onPackageFail?.(message, err);
+    } catch (e) {
+      console.warn(`Error when calling onPackageFail: ${(e as Error).message}`);
+    }
   }
 }
