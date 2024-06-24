@@ -17,6 +17,8 @@ export interface Output {
   audioStreams?: { codec: string; bitrate: number; channels: number }[];
 }
 
+const ENCORE_BASIC_AUTH_USER = 'user';
+
 export class EncorePackager {
   constructor(private config: PackagingConfig) {}
 
@@ -34,7 +36,19 @@ export class EncorePackager {
   }
 
   async getEncoreJob(url: string): Promise<EncoreJob> {
-    const response = await fetch(url);
+    const authHeader: { Authorization: string } | Record<string, never> = this
+      .config.encorePassword
+      ? {
+          Authorization:
+            'Basic ' +
+            Buffer.from(
+              `${ENCORE_BASIC_AUTH_USER}:${this.config.encorePassword}`
+            ).toString('base64')
+        }
+      : {};
+    const response = await fetch(url, {
+      headers: { ...authHeader }
+    });
     if (!response.ok) {
       throw new Error(
         `Failed to fetch job from Encore, got status: ${response.status}`

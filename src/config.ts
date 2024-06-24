@@ -22,6 +22,7 @@ export interface PackagingConfig {
   concurrency: number;
   shakaExecutable?: string;
   packageListenerPlugin?: string;
+  encorePassword?: string;
 }
 
 function readRedisConfig(): RedisConfig {
@@ -36,7 +37,8 @@ function readPackagingConfig(): PackagingConfig {
     outputFolder: resolve(process.env.PACKAGE_OUTPUT_FOLDER || 'packaged'),
     shakaExecutable: process.env.SHAKA_PACKAGER_EXECUTABLE,
     concurrency: parseInt(process.env.PACKAGE_CONCURRENCY || '1'),
-    packageListenerPlugin: process.env.PACKAGE_LISTENER_PLUGIN
+    packageListenerPlugin: process.env.PACKAGE_LISTENER_PLUGIN,
+    encorePassword: process.env.ENCORE_PASSWORD
   };
 }
 
