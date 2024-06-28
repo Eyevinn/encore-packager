@@ -1,11 +1,13 @@
 import { Input, doPackage, PackageOptions } from '@eyevinn/shaka-packager-s3';
 import { resolve } from 'node:path';
 import { PackagingConfig } from './config';
+import { basename, extname } from 'node:path';
 
 export interface EncoreJob {
   id: string;
   status: string;
   output?: Output[];
+  inputs: EncoreInput[];
 }
 
 export interface Output {
@@ -17,6 +19,10 @@ export interface Output {
   audioStreams?: { codec: string; bitrate: number; channels: number }[];
 }
 
+export interface EncoreInput {
+  uri: string;
+}
+
 const ENCORE_BASIC_AUTH_USER = 'user';
 
 export class EncorePackager {
@@ -25,7 +31,7 @@ export class EncorePackager {
   async package(jobUrl: string) {
     const job = await this.getEncoreJob(jobUrl);
     const inputs = parseInputsFromEncoreJob(job);
-    const dest = resolve(this.config.outputFolder, job.id);
+    const dest = this.getPackageDestination(job);
     await doPackage({
       dest,
       inputs,
@@ -33,6 +39,12 @@ export class EncorePackager {
       shakaExecutable: this.config.shakaExecutable
     } as PackageOptions);
     console.log(`Finished packaging of job ${job.id} to output folder ${dest}`);
+  }
+
+  getPackageDestination(job: EncoreJob) {
+    const inputUri = job.inputs[0].uri;
+    const inputBasename = basename(inputUri, extname(inputUri));
+    return resolve(this.config.outputFolder, inputBasename, job.id);
   }
 
   async getEncoreJob(url: string): Promise<EncoreJob> {
