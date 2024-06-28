@@ -1,6 +1,6 @@
 {
   "name": "@eyevinn/encore-packager",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "The default typescript-nodejs template for eyevinn projects",
   "bin": {
     "encore-packager": "./dist/cli.js"
