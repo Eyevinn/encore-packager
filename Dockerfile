@@ -3,6 +3,8 @@ ARG NODE_IMAGE=node:18-alpine
 FROM ${NODE_IMAGE}
 ENV NODE_ENV=production
 EXPOSE 8000
+RUN apk --no-cache add curl
+RUN apk --no-cache add aws-cli
 RUN mkdir /app
 RUN chown node:node /app
 USER node
