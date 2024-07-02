@@ -29,6 +29,9 @@ package the output of the transcoding job referenced by the message.
 | `PACKAGE_CONCURRENCY`       | Number of concurrent packaging jobs                                                            | `1`                      |
 | `PACKAGE_LISTENER_PLUGIN`   | Optional path to a javascript file containing a custom listener for packaging event, see below |                          |
 | `ENCORE_PASSWORD`           | Optional password for the encore instance `user` user                                          |                          |
+| `OSC_ACCESS_TOKEN`          | Optional OSC access token for accessing Encore instance in OSC                                 |                          |
+| `AWS_ACCESS_KEY_ID`         | Optional AWS access key id when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                    |                          |
+| `AWS_SECRET_ACCESS_KEY`     | Optional AWS secret access key when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                |                          |
 
 ```bash
 npm run start
