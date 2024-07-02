@@ -23,6 +23,7 @@ export interface PackagingConfig {
   shakaExecutable?: string;
   packageListenerPlugin?: string;
   encorePassword?: string;
+  oscAccessToken?: string;
 }
 
 function readRedisConfig(): RedisConfig {
@@ -34,11 +35,14 @@ function readRedisConfig(): RedisConfig {
 
 function readPackagingConfig(): PackagingConfig {
   return {
-    outputFolder: resolve(process.env.PACKAGE_OUTPUT_FOLDER || 'packaged'),
+    outputFolder: process.env.PACKAGE_OUTPUT_FOLDER?.match(/^s3:/)
+      ? new URL(process.env.PACKAGE_OUTPUT_FOLDER).toString()
+      : resolve(process.env.PACKAGE_OUTPUT_FOLDER || 'packaged'),
     shakaExecutable: process.env.SHAKA_PACKAGER_EXECUTABLE,
     concurrency: parseInt(process.env.PACKAGE_CONCURRENCY || '1'),
     packageListenerPlugin: process.env.PACKAGE_LISTENER_PLUGIN,
-    encorePassword: process.env.ENCORE_PASSWORD
+    encorePassword: process.env.ENCORE_PASSWORD,
+    oscAccessToken: process.env.OSC_ACCESS_TOKEN
   };
 }
 

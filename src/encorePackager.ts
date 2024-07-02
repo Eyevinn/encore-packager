@@ -2,6 +2,7 @@ import { Input, doPackage, PackageOptions } from '@eyevinn/shaka-packager-s3';
 import { resolve } from 'node:path';
 import { PackagingConfig } from './config';
 import { basename, extname } from 'node:path';
+import { Context } from '@osaas/client-core';
 
 export interface EncoreJob {
   id: string;
@@ -12,6 +13,7 @@ export interface EncoreJob {
 
 export interface Output {
   type: string;
+  format: string;
   file: string;
   fileSize: number;
   overallBitrate: number;
@@ -31,10 +33,19 @@ export class EncorePackager {
   async package(jobUrl: string) {
     const job = await this.getEncoreJob(jobUrl);
     const inputs = parseInputsFromEncoreJob(job);
+    let serviceAccessToken = undefined;
+    if (this.config.oscAccessToken) {
+      const ctx = new Context({
+        personalAccessToken: this.config.oscAccessToken
+      });
+      serviceAccessToken = await ctx.getServiceAccessToken('encore');
+    }
     const dest = this.getPackageDestination(job);
     await doPackage({
       dest,
       inputs,
+      source: this.config.oscAccessToken ? new URL(jobUrl).origin : undefined,
+      serviceAccessToken,
       noImplicitAudio: true,
       shakaExecutable: this.config.shakaExecutable
     } as PackageOptions);
@@ -44,7 +55,13 @@ export class EncorePackager {
   getPackageDestination(job: EncoreJob) {
     const inputUri = job.inputs[0].uri;
     const inputBasename = basename(inputUri, extname(inputUri));
-    return resolve(this.config.outputFolder, inputBasename, job.id);
+    if (this.config.outputFolder.match(/^s3:/)) {
+      return new URL(
+        this.config.outputFolder + inputBasename + '/' + job.id
+      ).toString();
+    } else {
+      return resolve(this.config.outputFolder, inputBasename, job.id);
+    }
   }
 
   async getEncoreJob(url: string): Promise<EncoreJob> {
@@ -58,8 +75,20 @@ export class EncorePackager {
             ).toString('base64')
         }
       : {};
+    let sat;
+    if (this.config.oscAccessToken) {
+      const ctx = new Context({
+        personalAccessToken: this.config.oscAccessToken
+      });
+      sat = await ctx.getServiceAccessToken('encore');
+    }
+    const jwtHeader: { 'x-jwt': string } | Record<string, never> = sat
+      ? {
+          'x-jwt': `Bearer ${sat}`
+        }
+      : {};
     const response = await fetch(url, {
-      headers: { ...authHeader }
+      headers: { ...authHeader, ...jwtHeader }
     });
     if (!response.ok) {
       throw new Error(
@@ -80,7 +109,9 @@ export function parseInputsFromEncoreJob(job: EncoreJob) {
     throw new Error('Encore job has no output');
   }
   const video = job.output
-    .filter((output) => output.type === 'VideoFile')
+    .filter(
+      (output) => output.type === 'VideoFile' && output.format.includes('mp4')
+    )
     .map((output) => ({ output, videoStream: output.videoStreams?.[0] }));
   const audio = job.output
     .filter((output) => output.type === 'AudioFile')
