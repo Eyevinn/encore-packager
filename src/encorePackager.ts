@@ -110,7 +110,7 @@ export function parseInputsFromEncoreJob(job: EncoreJob) {
   }
   const video = job.output
     .filter(
-      (output) => output.type === 'VideoFile' && output.format.includes('mp4')
+      (output) => output.type === 'VideoFile'
     )
     .map((output) => ({ output, videoStream: output.videoStreams?.[0] }));
   const audio = job.output
