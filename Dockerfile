@@ -17,4 +17,6 @@ RUN npm pkg delete scripts.prepare \
 COPY --from=google/shaka-packager:v3.2.0 /usr/bin/packager /usr/bin/packager
 ENV STAGING_DIR=/data
 VOLUME [ "/data" ]
+RUN mkdir /data/tmp
+ENV TMPDIR=/data/tmp
 CMD [ "npm", "run", "start", "--", "-r" ]
