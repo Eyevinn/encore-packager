@@ -24,6 +24,7 @@ export interface PackagingConfig {
   packageListenerPlugin?: string;
   encorePassword?: string;
   oscAccessToken?: string;
+  stagingDir?: string;
 }
 
 function readRedisConfig(): RedisConfig {
@@ -42,7 +43,8 @@ function readPackagingConfig(): PackagingConfig {
     concurrency: parseInt(process.env.PACKAGE_CONCURRENCY || '1'),
     packageListenerPlugin: process.env.PACKAGE_LISTENER_PLUGIN,
     encorePassword: process.env.ENCORE_PASSWORD,
-    oscAccessToken: process.env.OSC_ACCESS_TOKEN
+    oscAccessToken: process.env.OSC_ACCESS_TOKEN,
+    stagingDir: process.env.STAGING_DIR
   };
 }
 
