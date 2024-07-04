@@ -47,7 +47,8 @@ export class EncorePackager {
       source: this.config.oscAccessToken ? new URL(jobUrl).origin : undefined,
       serviceAccessToken,
       noImplicitAudio: true,
-      shakaExecutable: this.config.shakaExecutable
+      shakaExecutable: this.config.shakaExecutable,
+      stagingDir: this.config.stagingDir
     } as PackageOptions);
     console.log(`Finished packaging of job ${job.id} to output folder ${dest}`);
   }
@@ -109,9 +110,7 @@ export function parseInputsFromEncoreJob(job: EncoreJob) {
     throw new Error('Encore job has no output');
   }
   const video = job.output
-    .filter(
-      (output) => output.type === 'VideoFile'
-    )
+    .filter((output) => output.type === 'VideoFile')
     .map((output) => ({ output, videoStream: output.videoStreams?.[0] }));
   const audio = job.output
     .filter((output) => output.type === 'AudioFile')
