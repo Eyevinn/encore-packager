@@ -30,7 +30,7 @@ export interface PackagingConfig {
 function readRedisConfig(): RedisConfig {
   return {
     url: process.env.REDIS_URL || 'redis://localhost:6379',
-    queueName: process.env.REDIS_QUEUE_NAME || 'packaging-queue'
+    queueName: process.env.REDIS_QUEUE || 'packaging-queue'
   };
 }
 
