@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { PackageFormatOptions } from '@eyevinn/shaka-packager-s3/dist/packager';
 
 export interface Config {
   healthcheck: HealthCheckConfig;
@@ -19,13 +20,28 @@ export interface RedisConfig {
 
 export interface PackagingConfig {
   outputFolder: string;
+  outputSubfolderTemplate: string;
   concurrency: number;
   shakaExecutable?: string;
   packageListenerPlugin?: string;
   encorePassword?: string;
   oscAccessToken?: string;
   stagingDir?: string;
+  packageFormatOptions?: PackageFormatOptions;
+  streamKeysConfig: StreamKeyTemplates;
 }
+
+export const DEFAULT_OUTPUT_SUBFOLDER_TEMPLATE = '$INPUTNAME$/$JOBID$';
+
+export interface StreamKeyTemplates {
+  video: string;
+  audio: string;
+}
+
+export const DEFAULT_STREAM_KEY_TEMPLATES: StreamKeyTemplates = {
+  video: '$VIDEOIDX$_$BITRATE$',
+  audio: '$AUDIOIDX$'
+};
 
 function readRedisConfig(): RedisConfig {
   return {
@@ -35,16 +51,36 @@ function readRedisConfig(): RedisConfig {
 }
 
 function readPackagingConfig(): PackagingConfig {
+  const packageFormatOptions = process.env.PACKAGE_FORMAT_OPTIONS_JSON
+    ? (JSON.parse(
+        process.env.PACKAGE_FORMAT_OPTIONS_JSON
+      ) as PackageFormatOptions)
+    : undefined;
+
+  const streamKeysConfig: StreamKeyTemplates = {
+    video:
+      process.env.VIDEO_STREAM_KEY_TEMPLATE ||
+      DEFAULT_STREAM_KEY_TEMPLATES.video,
+    audio:
+      process.env.AUDIO_STREAM_KEY_TEMPLATE ||
+      DEFAULT_STREAM_KEY_TEMPLATES.audio
+  };
+
   return {
     outputFolder: process.env.PACKAGE_OUTPUT_FOLDER?.match(/^s3:/)
       ? new URL(process.env.PACKAGE_OUTPUT_FOLDER).toString()
       : resolve(process.env.PACKAGE_OUTPUT_FOLDER || 'packaged'),
+    outputSubfolderTemplate:
+      process.env.OUTPUT_SUBFOLDER_TEMPLATE ||
+      DEFAULT_OUTPUT_SUBFOLDER_TEMPLATE,
     shakaExecutable: process.env.SHAKA_PACKAGER_EXECUTABLE,
     concurrency: parseInt(process.env.PACKAGE_CONCURRENCY || '1'),
     packageListenerPlugin: process.env.PACKAGE_LISTENER_PLUGIN,
     encorePassword: process.env.ENCORE_PASSWORD,
     oscAccessToken: process.env.OSC_ACCESS_TOKEN,
-    stagingDir: process.env.STAGING_DIR
+    stagingDir: process.env.STAGING_DIR,
+    packageFormatOptions,
+    streamKeysConfig
   };
 }
 

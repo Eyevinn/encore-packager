@@ -17,21 +17,40 @@ package the output of the transcoding job referenced by the message.
 
 #### Environment variables
 
-| Variable                    | Description                                                                                    | Default value            |
-| --------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------ |
-| `REDIS_URL`                 | URL to the redis server                                                                        | `redis://localhost:6379` |
-| `REDIS_QUEUE`               | Name of the redis queue to listen to                                                           | `packaging-queue`        |
-| `HOST`                      | Hostname or IP address to bind to for healtchechk endpoint                                     | `0.0.0.0`                |
-| `PORT`                      | Port to bind to for healtchechk endpoint                                                       | `8000`                   |
-| `DISABLE_HEALTCHECK`        | Disable the healthcheck endpoint                                                               | `false`                  |
-| `SHAKA_PACKAGER_EXECUTABLE` | Path to the shaka packager executable                                                          | `packager`               |
-| `PACKAGE_OUTPUT_FOLDER`     | Base folder for output, actual output will be in a subfolder named from the job id             | `packaged`               |
-| `PACKAGE_CONCURRENCY`       | Number of concurrent packaging jobs                                                            | `1`                      |
-| `PACKAGE_LISTENER_PLUGIN`   | Optional path to a javascript file containing a custom listener for packaging event, see below |                          |
-| `ENCORE_PASSWORD`           | Optional password for the encore instance `user` user                                          |                          |
-| `OSC_ACCESS_TOKEN`          | Optional OSC access token for accessing Encore instance in OSC                                 |                          |
-| `AWS_ACCESS_KEY_ID`         | Optional AWS access key id when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                    |                          |
-| `AWS_SECRET_ACCESS_KEY`     | Optional AWS secret access key when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                |                          |
+| Variable                      | Description                                                                                                                                                                                             | Default value            |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| `REDIS_URL`                   | URL to the redis server                                                                                                                                                                                 | `redis://localhost:6379` |
+| `REDIS_QUEUE`                 | Name of the redis queue to listen to                                                                                                                                                                    | `packaging-queue`        |
+| `HOST`                        | Hostname or IP address to bind to for healtchechk endpoint                                                                                                                                              | `0.0.0.0`                |
+| `PORT`                        | Port to bind to for healtchechk endpoint                                                                                                                                                                | `8000`                   |
+| `DISABLE_HEALTCHECK`          | Disable the healthcheck endpoint                                                                                                                                                                        | `false`                  |
+| `SHAKA_PACKAGER_EXECUTABLE`   | Path to the shaka packager executable                                                                                                                                                                   | `packager`               |
+| `PACKAGE_OUTPUT_FOLDER`       | Base folder for output, actual output will be in a subfolder according to `OUTPUT_SUBFOLDER_TEMPLATE`                                                                                                   | `packaged`               |
+| `PACKAGE_CONCURRENCY`         | Number of concurrent packaging jobs                                                                                                                                                                     | `1`                      |
+| `PACKAGE_LISTENER_PLUGIN`     | Optional path to a javascript file containing a custom listener for packaging event, see below                                                                                                          |                          |
+| `PACKAGE_FORMAT_OPTIONS_JSON` | Optional JSON string with format options for shaka packager, format as defined in https://github.com/Eyevinn/shaka-packager-s3/blob/main/src/packager.ts                                                |
+| `VIDEO_STREAM_KEY_TEMPLATE`   | Optional template for video stream key, see below for supported keywords                                                                                                                                | `$VIDEOIDX$_$BITRATE$`   |
+| `AUDIO_STREAM_KEY_TEMPLATE`   | Optional template for video stream key, see below for supported keywords                                                                                                                                | `$AUDIOIDX$`             |
+| `OUTPUT_SUBFOLDER_TEMPLATE`   | Template for subfolder relative to `PACKAGE_OUTPUT_FOLDER` where output will be stored. Keywords `$INPUTNAME$` and `$JOBID$` will be replaced with basename of input, and id of encore job respectively | `$INPUTNAME$/$JOBID$`    |
+| `ENCORE_PASSWORD`             | Optional password for the encore instance `user` user                                                                                                                                                   |                          |
+| `OSC_ACCESS_TOKEN`            | Optional OSC access token for accessing Encore instance in OSC                                                                                                                                          |                          |
+| `AWS_ACCESS_KEY_ID`           | Optional AWS access key id when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                                                                                                                             |                          |
+| `AWS_SECRET_ACCESS_KEY`       | Optional AWS secret access key when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                                                                                                                         |                          |
+
+##### Stream key templates
+
+Stream key templates can be used to set the 'key' for each stream, which decides how the stream is identified in the packaged manifest.
+
+Keywords in the template are replaced with values according to the table below.
+
+| Keyword      | Value                                                                                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `$VIDEOIDX$` | Video stream index, starting from 0                                                                                                               |
+| `$AUDIOIDX$` | Audio stream index, starting from 0                                                                                                               |
+| `$TOTALIDX$` | Total stream index. For video streams, this is the video stream index. For Audio streams, this is audio stream index plus number of video streams |
+| `$BITRATE$`  | Bitrate of the stream                                                                                                                             |
+
+#### Starting the service
 
 ```bash
 npm run start
