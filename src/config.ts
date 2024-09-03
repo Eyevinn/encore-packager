@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { PackageFormatOptions } from '@eyevinn/shaka-packager-s3/dist/packager';
 
 export interface Config {
   healthcheck: HealthCheckConfig;
@@ -25,6 +26,7 @@ export interface PackagingConfig {
   encorePassword?: string;
   oscAccessToken?: string;
   stagingDir?: string;
+  packageFormatOptions?: PackageFormatOptions;
 }
 
 function readRedisConfig(): RedisConfig {
@@ -35,6 +37,12 @@ function readRedisConfig(): RedisConfig {
 }
 
 function readPackagingConfig(): PackagingConfig {
+  const packageFormatOptions = process.env.PACKAGE_FORMAT_OPTIONS_JSON
+    ? (JSON.parse(
+        process.env.PACKAGE_FORMAT_OPTIONS_JSON
+      ) as PackageFormatOptions)
+    : undefined;
+
   return {
     outputFolder: process.env.PACKAGE_OUTPUT_FOLDER?.match(/^s3:/)
       ? new URL(process.env.PACKAGE_OUTPUT_FOLDER).toString()
@@ -44,7 +52,8 @@ function readPackagingConfig(): PackagingConfig {
     packageListenerPlugin: process.env.PACKAGE_LISTENER_PLUGIN,
     encorePassword: process.env.ENCORE_PASSWORD,
     oscAccessToken: process.env.OSC_ACCESS_TOKEN,
-    stagingDir: process.env.STAGING_DIR
+    stagingDir: process.env.STAGING_DIR,
+    packageFormatOptions
   };
 }
 

@@ -48,7 +48,8 @@ export class EncorePackager {
       serviceAccessToken,
       noImplicitAudio: true,
       shakaExecutable: this.config.shakaExecutable,
-      stagingDir: this.config.stagingDir
+      stagingDir: this.config.stagingDir,
+      packageFormatOptions: this.config.packageFormatOptions
     } as PackageOptions);
     console.log(`Finished packaging of job ${job.id} to output folder ${dest}`);
   }

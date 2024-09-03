@@ -21,7 +21,7 @@
     "node": ">=18.15.0"
   },
   "dependencies": {
-    "@eyevinn/shaka-packager-s3": "^0.3.0",
+    "@eyevinn/shaka-packager-s3": "^0.4.0",
     "@fastify/cors": "^8.2.0",
     "@fastify/type-provider-typebox": "^2.4.0",
     "@osaas/client-core": "^0.8.0",

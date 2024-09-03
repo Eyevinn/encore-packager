@@ -17,21 +17,22 @@ package the output of the transcoding job referenced by the message.
 
 #### Environment variables
 
-| Variable                    | Description                                                                                    | Default value            |
-| --------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------ |
-| `REDIS_URL`                 | URL to the redis server                                                                        | `redis://localhost:6379` |
-| `REDIS_QUEUE`               | Name of the redis queue to listen to                                                           | `packaging-queue`        |
-| `HOST`                      | Hostname or IP address to bind to for healtchechk endpoint                                     | `0.0.0.0`                |
-| `PORT`                      | Port to bind to for healtchechk endpoint                                                       | `8000`                   |
-| `DISABLE_HEALTCHECK`        | Disable the healthcheck endpoint                                                               | `false`                  |
-| `SHAKA_PACKAGER_EXECUTABLE` | Path to the shaka packager executable                                                          | `packager`               |
-| `PACKAGE_OUTPUT_FOLDER`     | Base folder for output, actual output will be in a subfolder named from the job id             | `packaged`               |
-| `PACKAGE_CONCURRENCY`       | Number of concurrent packaging jobs                                                            | `1`                      |
+| Variable                    | Description                                                                                   | Default value            |
+| --------------------------- |-----------------------------------------------------------------------------------------------| ------------------------ |
+| `REDIS_URL`                 | URL to the redis server                                                                       | `redis://localhost:6379` |
+| `REDIS_QUEUE`               | Name of the redis queue to listen to                                                          | `packaging-queue`        |
+| `HOST`                      | Hostname or IP address to bind to for healtchechk endpoint                                    | `0.0.0.0`                |
+| `PORT`                      | Port to bind to for healtchechk endpoint                                                      | `8000`                   |
+| `DISABLE_HEALTCHECK`        | Disable the healthcheck endpoint                                                              | `false`                  |
+| `SHAKA_PACKAGER_EXECUTABLE` | Path to the shaka packager executable                                                         | `packager`               |
+| `PACKAGE_OUTPUT_FOLDER`     | Base folder for output, actual output will be in a subfolder named from the job id            | `packaged`               |
+| `PACKAGE_CONCURRENCY`       | Number of concurrent packaging jobs                                                           | `1`                      |
 | `PACKAGE_LISTENER_PLUGIN`   | Optional path to a javascript file containing a custom listener for packaging event, see below |                          |
-| `ENCORE_PASSWORD`           | Optional password for the encore instance `user` user                                          |                          |
-| `OSC_ACCESS_TOKEN`          | Optional OSC access token for accessing Encore instance in OSC                                 |                          |
-| `AWS_ACCESS_KEY_ID`         | Optional AWS access key id when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                    |                          |
-| `AWS_SECRET_ACCESS_KEY`     | Optional AWS secret access key when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                |                          |
+| `PACKAGE_FORMAT_OPTIONS_JSON` | Optional JSON string with format options for shaka packager, format as defined in https://github.com/Eyevinn/shaka-packager-s3/blob/main/src/packager.ts            |
+| `ENCORE_PASSWORD`           | Optional password for the encore instance `user` user                                         |                          |
+| `OSC_ACCESS_TOKEN`          | Optional OSC access token for accessing Encore instance in OSC                                |                          |
+| `AWS_ACCESS_KEY_ID`         | Optional AWS access key id when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                   |                          |
+| `AWS_SECRET_ACCESS_KEY`     | Optional AWS secret access key when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket               |                          |
 
 ```bash
 npm run start
