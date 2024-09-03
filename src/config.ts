@@ -20,6 +20,7 @@ export interface RedisConfig {
 
 export interface PackagingConfig {
   outputFolder: string;
+  outputSubfolderTemplate: string;
   concurrency: number;
   shakaExecutable?: string;
   packageListenerPlugin?: string;
@@ -29,6 +30,8 @@ export interface PackagingConfig {
   packageFormatOptions?: PackageFormatOptions;
   streamKeysConfig: StreamKeyTemplates;
 }
+
+export const DEFAULT_OUTPUT_SUBFOLDER_TEMPLATE = '$INPUTNAME$/$JOBID$';
 
 export interface StreamKeyTemplates {
   video: string;
@@ -67,6 +70,9 @@ function readPackagingConfig(): PackagingConfig {
     outputFolder: process.env.PACKAGE_OUTPUT_FOLDER?.match(/^s3:/)
       ? new URL(process.env.PACKAGE_OUTPUT_FOLDER).toString()
       : resolve(process.env.PACKAGE_OUTPUT_FOLDER || 'packaged'),
+    outputSubfolderTemplate:
+      process.env.OUTPUT_SUBFOLDER_TEMPLATE ||
+      DEFAULT_OUTPUT_SUBFOLDER_TEMPLATE,
     shakaExecutable: process.env.SHAKA_PACKAGER_EXECUTABLE,
     concurrency: parseInt(process.env.PACKAGE_CONCURRENCY || '1'),
     packageListenerPlugin: process.env.PACKAGE_LISTENER_PLUGIN,

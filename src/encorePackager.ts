@@ -57,12 +57,13 @@ export class EncorePackager {
   getPackageDestination(job: EncoreJob) {
     const inputUri = job.inputs[0].uri;
     const inputBasename = basename(inputUri, extname(inputUri));
+    const subfolder = this.config.outputSubfolderTemplate
+      .replaceAll('$INPUTNAME$', inputBasename)
+      .replaceAll('$JOBID$', job.id);
     if (this.config.outputFolder.match(/^s3:/)) {
-      return new URL(
-        this.config.outputFolder + inputBasename + '/' + job.id
-      ).toString();
+      return new URL(this.config.outputFolder + subfolder).toString();
     } else {
-      return resolve(this.config.outputFolder, inputBasename, job.id);
+      return resolve(this.config.outputFolder, subfolder);
     }
   }
 
