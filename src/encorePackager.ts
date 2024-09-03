@@ -1,6 +1,6 @@
 import { Input, doPackage, PackageOptions } from '@eyevinn/shaka-packager-s3';
 import { resolve } from 'node:path';
-import { PackagingConfig } from './config';
+import { PackagingConfig, StreamKeyTemplates } from './config';
 import { basename, extname } from 'node:path';
 import { Context } from '@osaas/client-core';
 
@@ -32,7 +32,7 @@ export class EncorePackager {
 
   async package(jobUrl: string) {
     const job = await this.getEncoreJob(jobUrl);
-    const inputs = parseInputsFromEncoreJob(job);
+    const inputs = parseInputsFromEncoreJob(job, this.config.streamKeysConfig);
     let serviceAccessToken = undefined;
     if (this.config.oscAccessToken) {
       const ctx = new Context({
@@ -101,7 +101,10 @@ export class EncorePackager {
   }
 }
 
-export function parseInputsFromEncoreJob(job: EncoreJob) {
+export function parseInputsFromEncoreJob(
+  job: EncoreJob,
+  streamKeysConfig: StreamKeyTemplates
+) {
   const inputs: Input[] = [];
 
   if (job.status !== 'SUCCESSFUL') {
@@ -135,15 +138,46 @@ export function parseInputsFromEncoreJob(job: EncoreJob) {
     const bitrateKb = v.videoStream?.bitrate
       ? Math.round(v.videoStream?.bitrate / 1000)
       : 0;
-    const key = `${videoIdx++}_${bitrateKb}`;
+    const key = keyFromTemplate(streamKeysConfig.video, {
+      videoIdx,
+      audioIdx: 0,
+      totalIdx: videoIdx,
+      bitrate: bitrateKb
+    });
     inputs.push({ type: 'video', key, filename: v.output.file });
+    videoIdx++;
   });
   let audioIdx = 0;
   audio.forEach((audio) => {
-    const key = `${audioIdx++}`;
+    const bitrateKb = audio.audioStream?.bitrate
+      ? Math.round(audio.audioStream?.bitrate / 1000)
+      : 0;
+    const key = keyFromTemplate(streamKeysConfig.audio, {
+      videoIdx,
+      audioIdx,
+      totalIdx: videoIdx + audioIdx,
+      bitrate: bitrateKb
+    });
     inputs.push({ type: 'audio', key, filename: audio.output.file });
+    audioIdx++;
   });
   return inputs;
+}
+
+function keyFromTemplate(
+  template: string,
+  values: {
+    videoIdx: number;
+    audioIdx: number;
+    totalIdx: number;
+    bitrate: number;
+  }
+) {
+  return template
+    .replaceAll('$VIDEOIDX$', `${values.videoIdx}`)
+    .replaceAll('$AUDIOIDX$', `${values.audioIdx}`)
+    .replaceAll('$TOTALIDX$', `${values.totalIdx}`)
+    .replaceAll('$BITRATE$', `${values.bitrate}`);
 }
 
 function hasStereoAudioStream(output: Output) {

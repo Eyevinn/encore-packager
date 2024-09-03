@@ -27,7 +27,18 @@ export interface PackagingConfig {
   oscAccessToken?: string;
   stagingDir?: string;
   packageFormatOptions?: PackageFormatOptions;
+  streamKeysConfig: StreamKeyTemplates;
 }
+
+export interface StreamKeyTemplates {
+  video: string;
+  audio: string;
+}
+
+export const DEFAULT_STREAM_KEY_TEMPLATES: StreamKeyTemplates = {
+  video: '$VIDEOIDX$_$BITRATE$',
+  audio: '$AUDIOIDX$'
+};
 
 function readRedisConfig(): RedisConfig {
   return {
@@ -43,6 +54,15 @@ function readPackagingConfig(): PackagingConfig {
       ) as PackageFormatOptions)
     : undefined;
 
+  const streamKeysConfig: StreamKeyTemplates = {
+    video:
+      process.env.VIDEO_STREAM_KEY_TEMPLATE ||
+      DEFAULT_STREAM_KEY_TEMPLATES.video,
+    audio:
+      process.env.AUDIO_STREAM_KEY_TEMPLATE ||
+      DEFAULT_STREAM_KEY_TEMPLATES.audio
+  };
+
   return {
     outputFolder: process.env.PACKAGE_OUTPUT_FOLDER?.match(/^s3:/)
       ? new URL(process.env.PACKAGE_OUTPUT_FOLDER).toString()
@@ -53,7 +73,8 @@ function readPackagingConfig(): PackagingConfig {
     encorePassword: process.env.ENCORE_PASSWORD,
     oscAccessToken: process.env.OSC_ACCESS_TOKEN,
     stagingDir: process.env.STAGING_DIR,
-    packageFormatOptions
+    packageFormatOptions,
+    streamKeysConfig
   };
 }
 
