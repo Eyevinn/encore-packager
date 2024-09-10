@@ -1,8 +1,14 @@
-import { Input, doPackage, PackageOptions } from '@eyevinn/shaka-packager-s3';
+import {
+  Input,
+  doPackage,
+  PackageOptions,
+  PackageFormatOptions
+} from '@eyevinn/shaka-packager-s3';
 import { resolve } from 'node:path';
 import { PackagingConfig, StreamKeyTemplates } from './config';
 import { basename, extname } from 'node:path';
 import { Context } from '@osaas/client-core';
+import { PackageFormatOptions } from '@eyevinn/shaka-packager-s3/dist/packager';
 
 export interface EncoreJob {
   id: string;
@@ -41,6 +47,7 @@ export class EncorePackager {
       serviceAccessToken = await ctx.getServiceAccessToken('encore');
     }
     const dest = this.getPackageDestination(job);
+    const packageFormatOptions = this.getPackageFormatOptions(job);
     await doPackage({
       dest,
       inputs,
@@ -49,22 +56,48 @@ export class EncorePackager {
       noImplicitAudio: true,
       shakaExecutable: this.config.shakaExecutable,
       stagingDir: this.config.stagingDir,
-      packageFormatOptions: this.config.packageFormatOptions
+      packageFormatOptions
     } as PackageOptions);
     console.log(`Finished packaging of job ${job.id} to output folder ${dest}`);
   }
 
   getPackageDestination(job: EncoreJob) {
-    const inputUri = job.inputs[0].uri;
-    const inputBasename = basename(inputUri, extname(inputUri));
-    const subfolder = this.config.outputSubfolderTemplate
-      .replaceAll('$INPUTNAME$', inputBasename)
-      .replaceAll('$JOBID$', job.id);
+    const subfolder = this.resolveTemplate(
+      this.config.outputSubfolderTemplate,
+      job
+    );
     if (this.config.outputFolder.match(/^s3:/)) {
       return new URL(this.config.outputFolder + subfolder).toString();
     } else {
       return resolve(this.config.outputFolder, subfolder);
     }
+  }
+
+  getPackageFormatOptions(job: EncoreJob): PackageFormatOptions {
+    const packageFormatOptions: PackageFormatOptions = {
+      ...this.config.packageFormatOptions
+    };
+    if (this.config.manifestNamesConfig.dashManifestNameTemplate) {
+      packageFormatOptions.dashManifestName = this.resolveTemplate(
+        this.config.manifestNamesConfig.dashManifestNameTemplate,
+        job
+      );
+    }
+    if (this.config.manifestNamesConfig.hlsManifestNameTemplate) {
+      packageFormatOptions.hlsManifestName = this.resolveTemplate(
+        this.config.manifestNamesConfig.hlsManifestNameTemplate,
+        job
+      );
+    }
+    return packageFormatOptions;
+  }
+
+  resolveTemplate(template: string, job: EncoreJob) {
+    const inputUri = job.inputs[0].uri;
+    const inputBasename = basename(inputUri, extname(inputUri));
+    return template
+      .replaceAll('$JOBID$', job.id)
+      .replaceAll('$INPUTNAME$', inputBasename);
   }
 
   async getEncoreJob(url: string): Promise<EncoreJob> {
