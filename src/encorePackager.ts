@@ -8,7 +8,7 @@ import { resolve } from 'node:path';
 import { PackagingConfig, StreamKeyTemplates } from './config';
 import { basename, extname } from 'node:path';
 import { Context } from '@osaas/client-core';
-import { PackageFormatOptions } from '@eyevinn/shaka-packager-s3/dist/packager';
+import logger from './logger';
 
 export interface EncoreJob {
   id: string;
@@ -58,7 +58,7 @@ export class EncorePackager {
       stagingDir: this.config.stagingDir,
       packageFormatOptions
     } as PackageOptions);
-    console.log(`Finished packaging of job ${job.id} to output folder ${dest}`);
+    logger.info(`Finished packaging of job ${job.id} to output folder ${dest}`);
   }
 
   getPackageDestination(job: EncoreJob) {

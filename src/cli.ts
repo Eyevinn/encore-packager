@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import { startListener } from './server';
 import { readConfig } from './config';
 import { EncorePackager } from './encorePackager';
+import logger from './logger';
 
 const cli = new Command();
 
@@ -17,7 +18,7 @@ cli
   .action(async (options) => {
     if (options.redisListener) {
       if (options.url) {
-        console.warn('Ignoring URL option when running in service mode');
+        logger.warn('Ignoring URL option when running in service mode');
       }
       await startListener(readConfig());
     } else {

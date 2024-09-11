@@ -3,6 +3,7 @@ import { RedisListener } from './redisListener';
 import { EncorePackager } from './encorePackager';
 import { Config } from './config';
 import { PackageListener } from './packageListener';
+import logger from './logger';
 
 async function loadPackageListener(
   pluginPath: string | undefined
@@ -15,9 +16,10 @@ async function loadPackageListener(
     const module = await import(pluginPath);
     return module as PackageListener;
   } catch (err) {
-    console.error(
-      `Failed to load notifications module from ${pluginPath}`,
-      err
+    logger.error(
+      `Failed to load notifications module from ${pluginPath}: ${
+        (err as Error)?.message
+      }`
     );
   }
   return undefined;
@@ -29,7 +31,7 @@ export async function startListener(config: Config) {
   );
 
   const encorePackager = new EncorePackager(config.packaging);
-  console.log('Starting redis listener');
+  logger.info('Starting redis listener');
   const redisListener = new RedisListener(
     config.redis,
     (message) => {
@@ -41,7 +43,7 @@ export async function startListener(config: Config) {
   redisListener.start();
 
   if (!config.healthcheck.disabled) {
-    console.log(
+    logger.info(
       `Starting healthcheck endpoint on ${config.healthcheck.host}:${config.healthcheck.port}`
     );
     const server = api({ redisStatus: () => redisListener.redisStatus() });
@@ -51,7 +53,7 @@ export async function startListener(config: Config) {
         if (err) {
           throw err;
         }
-        console.log(`Server listening on ${address}`);
+        logger.info(`Server listening on ${address}`);
       }
     );
   }
