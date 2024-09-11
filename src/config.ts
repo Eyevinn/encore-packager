@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { PackageFormatOptions } from '@eyevinn/shaka-packager-s3/dist/packager';
+import { PackageFormatOptions } from '@eyevinn/shaka-packager-s3';
 
 export interface Config {
   healthcheck: HealthCheckConfig;
@@ -29,6 +29,7 @@ export interface PackagingConfig {
   stagingDir?: string;
   packageFormatOptions?: PackageFormatOptions;
   streamKeysConfig: StreamKeyTemplates;
+  manifestNamesConfig: ManifestNameTemplates;
 }
 
 export const DEFAULT_OUTPUT_SUBFOLDER_TEMPLATE = '$INPUTNAME$/$JOBID$';
@@ -42,6 +43,11 @@ export const DEFAULT_STREAM_KEY_TEMPLATES: StreamKeyTemplates = {
   video: '$VIDEOIDX$_$BITRATE$',
   audio: '$AUDIOIDX$'
 };
+
+export interface ManifestNameTemplates {
+  dashManifestNameTemplate?: string;
+  hlsManifestNameTemplate?: string;
+}
 
 function readRedisConfig(): RedisConfig {
   return {
@@ -66,6 +72,11 @@ function readPackagingConfig(): PackagingConfig {
       DEFAULT_STREAM_KEY_TEMPLATES.audio
   };
 
+  const manifestNamesConfig: ManifestNameTemplates = {
+    dashManifestNameTemplate: process.env.DASH_MANIFEST_NAME_TEMPLATE,
+    hlsManifestNameTemplate: process.env.HLS_MANIFEST_NAME_TEMPLATE
+  };
+
   return {
     outputFolder: process.env.PACKAGE_OUTPUT_FOLDER?.match(/^s3:/)
       ? new URL(process.env.PACKAGE_OUTPUT_FOLDER).toString()
@@ -80,7 +91,8 @@ function readPackagingConfig(): PackagingConfig {
     oscAccessToken: process.env.OSC_ACCESS_TOKEN,
     stagingDir: process.env.STAGING_DIR,
     packageFormatOptions,
-    streamKeysConfig
+    streamKeysConfig,
+    manifestNamesConfig
   };
 }
 

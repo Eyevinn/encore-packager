@@ -4,6 +4,7 @@ import { delay } from './util';
 import { Static, Type } from '@sinclair/typebox';
 import { TypeCompiler } from '@sinclair/typebox/compiler';
 import { PackageListener } from './packageListener';
+import logger from './logger';
 
 export const QueueMessage = Type.Object({
   jobId: Type.String(),
@@ -45,9 +46,8 @@ export class RedisListener {
               this.redisConfig.queueName,
               2000
             );
-            console.log(message);
           } catch (err) {
-            console.error(err);
+            logger.error(err);
           }
           if (message) {
             this.handleMessage(message.value);
@@ -56,7 +56,7 @@ export class RedisListener {
           await delay(1000);
         }
       } catch (err) {
-        console.error('Error when processing queue', err);
+        logger.error(`Error when processing queue: ${(err as Error)?.message}`);
         await delay(3000);
       }
     }
@@ -69,12 +69,12 @@ export class RedisListener {
 
   async handleMessage(message: string) {
     try {
-      console.log(`Recevied message: ${message}`);
+      logger.info(`Received message: ${message}`);
       const parsedMessage = JSON.parse(message);
       validateQueueMessage(parsedMessage);
       this.noProcessing++;
       try {
-        console.log(
+        logger.info(
           `Sending message for processing, currently processing ${this.noProcessing} messages`
         );
         this.onPackageStart(parsedMessage.url);
@@ -84,7 +84,7 @@ export class RedisListener {
         this.noProcessing--;
       }
     } catch (e) {
-      console.error(
+      logger.error(
         `Error when handling message ${message}: ${(e as Error)?.message}`
       );
       this.onPackageFail(message, e);
@@ -97,7 +97,7 @@ export class RedisListener {
     }
     this.client = await createClient({ url: this.redisConfig.url })
       .on('error', (err) => {
-        console.log('Redis Client Error', err);
+        logger.warn(`Redis Client Error: ${(err as Error).message}`);
       })
       .connect();
   }
@@ -118,7 +118,7 @@ export class RedisListener {
     try {
       this.packageListener?.onPackageStart?.(jobUrl);
     } catch (err) {
-      console.warn(
+      logger.warn(
         `Error when calling beforePackage: ${(err as Error).message}`
       );
     }
@@ -128,7 +128,7 @@ export class RedisListener {
     try {
       this.packageListener?.onPackageDone?.(jobUrl);
     } catch (err) {
-      console.warn(
+      logger.warn(
         `Error when calling onPackageDone: ${(err as Error).message}`
       );
     }
@@ -139,7 +139,7 @@ export class RedisListener {
     try {
       this.packageListener?.onPackageFail?.(message, err);
     } catch (e) {
-      console.warn(`Error when calling onPackageFail: ${(e as Error).message}`);
+      logger.warn(`Error when calling onPackageFail: ${(e as Error).message}`);
     }
   }
 }
