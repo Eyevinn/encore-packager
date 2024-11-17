@@ -50,6 +50,7 @@ export class EncorePackager {
     const packageFormatOptions = this.getPackageFormatOptions(job);
     await doPackage({
       dest,
+      s3EndpointUrl: this.config.s3EndpointUrl,
       inputs,
       source: this.config.oscAccessToken ? new URL(jobUrl).origin : undefined,
       serviceAccessToken,

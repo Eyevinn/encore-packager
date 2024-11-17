@@ -30,6 +30,7 @@ export interface PackagingConfig {
   packageFormatOptions?: PackageFormatOptions;
   streamKeysConfig: StreamKeyTemplates;
   manifestNamesConfig: ManifestNameTemplates;
+  s3EndpointUrl?: string;
 }
 
 export const DEFAULT_OUTPUT_SUBFOLDER_TEMPLATE = '$INPUTNAME$/$JOBID$';
@@ -92,7 +93,8 @@ function readPackagingConfig(): PackagingConfig {
     stagingDir: process.env.STAGING_DIR,
     packageFormatOptions,
     streamKeysConfig,
-    manifestNamesConfig
+    manifestNamesConfig,
+    s3EndpointUrl: process.env.S3_ENDPOINT_URL
   };
 }
 
