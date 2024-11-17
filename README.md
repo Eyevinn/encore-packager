@@ -38,7 +38,7 @@ package the output of the transcoding job referenced by the message.
 | `OSC_ACCESS_TOKEN`            | Optional OSC access token for accessing Encore instance in OSC                                                                                                                                                                   |                          |
 | `AWS_ACCESS_KEY_ID`           | Optional AWS access key id when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                                                                                                                                                      |                          |
 | `AWS_SECRET_ACCESS_KEY`       | Optional AWS secret access key when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                                                                                                                                                  |                          |
-| `S3_ENDPOINT_URL`             | Optional S3 Endpoint URL when `PACKAGE_OUTPUT_FOLDER` is an S3 bucket not on AWS |
+| `S3_ENDPOINT_URL`             | Optional S3 Endpoint URL when `PACKAGE_OUTPUT_FOLDER` is an S3 bucket not on AWS                                                                                                                                                 |
 
 ##### Stream key templates
 
