@@ -150,7 +150,7 @@ describe('Test parseInputsFromEncoreJob', () => {
 describe('Test EncorePackager file system methods', () => {
   const config = {
     outputFolder: 's3://bucket-name/prefix/',
-    outputSubfolderTemplate: '$INPUTNAME$/$JOBID$',
+    outputSubfolderTemplate: '$EXTERNALID$/$INPUTNAME$/$JOBID$',
     concurrency: 1
   } as PackagingConfig;
   const encorePackager = new EncorePackager(config);
@@ -166,7 +166,7 @@ describe('Test EncorePackager file system methods', () => {
       externalId: 'external-id'
     });
     expect(destination).toEqual(
-      's3://bucket-name/prefix/external-id/e5e76304-744c-41d6-85f7-69007b3b1a65'
+      's3://bucket-name/prefix/external-id/test-asset/e5e76304-744c-41d6-85f7-69007b3b1a65'
     );
   });
 });
