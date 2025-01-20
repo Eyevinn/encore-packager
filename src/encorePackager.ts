@@ -99,7 +99,7 @@ export class EncorePackager {
     const inputUri = job.inputs[0].uri;
     const inputBasename = basename(inputUri, extname(inputUri));
     return template
-      .replaceAll('$EXTERNALID$/', job.externalId ? job.externalId + '/' : '')
+      .replaceAll('$EXTERNALID$', job.externalId ? job.externalId : '')
       .replaceAll('$JOBID$', job.id)
       .replaceAll('$INPUTNAME$', inputBasename);
   }

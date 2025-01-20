@@ -3,9 +3,14 @@ import {
   EncorePackager,
   parseInputsFromEncoreJob
 } from './encorePackager';
-import { DEFAULT_STREAM_KEY_TEMPLATES, PackagingConfig } from './config';
+import {
+  DEFAULT_OUTPUT_SUBFOLDER_TEMPLATE,
+  DEFAULT_STREAM_KEY_TEMPLATES,
+  PackagingConfig
+} from './config';
 
 const job: EncoreJob = {
+  externalId: 'external-id',
   id: 'e5e76304-744c-41d6-85f7-69007b3b1a65',
   status: 'SUCCESSFUL',
   output: [
@@ -148,23 +153,26 @@ describe('Test parseInputsFromEncoreJob', () => {
 });
 
 describe('Test EncorePackager file system methods', () => {
-  const config = {
-    outputFolder: 's3://bucket-name/prefix/',
-    outputSubfolderTemplate: '$EXTERNALID$/$INPUTNAME$/$JOBID$',
-    concurrency: 1
-  } as PackagingConfig;
-  const encorePackager = new EncorePackager(config);
-  it('Uses the first input for templating', () => {
+  it("Doesn't use external ID if the template does not include it", () => {
+    const config = {
+      outputFolder: 's3://bucket-name/prefix/',
+      outputSubfolderTemplate: DEFAULT_OUTPUT_SUBFOLDER_TEMPLATE,
+      concurrency: 1
+    } as PackagingConfig;
+    const encorePackager = new EncorePackager(config);
     const destination = encorePackager.getPackageDestination(job);
     expect(destination).toEqual(
       's3://bucket-name/prefix/test-asset/e5e76304-744c-41d6-85f7-69007b3b1a65'
     );
   });
   it('Uses the external ID for templating when present', () => {
-    const destination = encorePackager.getPackageDestination({
-      ...job,
-      externalId: 'external-id'
-    });
+    const config = {
+      outputFolder: 's3://bucket-name/prefix/',
+      outputSubfolderTemplate: '$EXTERNALID$/$INPUTNAME$/$JOBID$',
+      concurrency: 1
+    } as PackagingConfig;
+    const encorePackager = new EncorePackager(config);
+    const destination = encorePackager.getPackageDestination(job);
     expect(destination).toEqual(
       's3://bucket-name/prefix/external-id/test-asset/e5e76304-744c-41d6-85f7-69007b3b1a65'
     );
