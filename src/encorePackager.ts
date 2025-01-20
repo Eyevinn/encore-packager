@@ -101,7 +101,7 @@ export class EncorePackager {
     const inputBasename = basename(inputUri, extname(inputUri));
     return template
       .replaceAll('$JOBID$', job.id)
-      .replaceAll('$INPUTNAME$', externalId? externalId : inputBasename);
+      .replaceAll('$INPUTNAME$', externalId ? externalId : inputBasename);
   }
 
   async getEncoreJob(url: string): Promise<EncoreJob> {
