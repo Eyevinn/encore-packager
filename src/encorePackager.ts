@@ -96,11 +96,10 @@ export class EncorePackager {
 
   // This is problematic, because it doesn't respect the external ID.
   resolveTemplate(template: string, job: EncoreJob) {
-    const externalId = job.externalId;
     const inputUri = job.inputs[0].uri;
     const inputBasename = basename(inputUri, extname(inputUri));
     return template
-      .replaceAll('$EXTERNALID$/', externalId?  externalId + '/' : '')
+      .replaceAll('$EXTERNALID$/', job.externalId ? job.externalId + '/' : '')
       .replaceAll('$JOBID$', job.id)
       .replaceAll('$INPUTNAME$', inputBasename);
   }
