@@ -5,6 +5,7 @@ export interface Config {
   healthcheck: HealthCheckConfig;
   redis: RedisConfig;
   packaging: PackagingConfig;
+  callback: CallbackConfig;
 }
 
 export interface HealthCheckConfig {
@@ -16,6 +17,10 @@ export interface HealthCheckConfig {
 export interface RedisConfig {
   url: string;
   queueName: string;
+}
+
+export interface CallbackConfig {
+  url: string;
 }
 
 export interface PackagingConfig {
@@ -54,6 +59,12 @@ function readRedisConfig(): RedisConfig {
   return {
     url: process.env.REDIS_URL || 'redis://localhost:6379',
     queueName: process.env.REDIS_QUEUE || 'packaging-queue'
+  };
+}
+
+function readCallbackConfig(): CallbackConfig {
+  return {
+    url: process.env.CALLBACK_URL || ''
   };
 }
 
@@ -106,6 +117,7 @@ export function readConfig(): Config {
       disabled: process.env.DISABLE_HEALTHCHECK === 'true'
     },
     redis: readRedisConfig(),
-    packaging: readPackagingConfig()
+    packaging: readPackagingConfig(),
+    callback: readCallbackConfig()
   };
 }
