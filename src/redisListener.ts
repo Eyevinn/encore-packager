@@ -77,9 +77,9 @@ export class RedisListener {
         logger.info(
           `Sending message for processing, currently processing ${this.noProcessing} messages`
         );
-        this.onPackageStart(parsedMessage.url);
+        this.onPackageStart(parsedMessage.url, parsedMessage.jobId);
         await this.onMessage(parsedMessage);
-        this.onPackageDone(parsedMessage.url);
+        this.onPackageDone(parsedMessage.url, parsedMessage.jobId);
       } finally {
         this.noProcessing--;
       }
@@ -114,9 +114,9 @@ export class RedisListener {
     return this.client.isReady ? 'UP' : 'DOWN';
   }
 
-  onPackageStart(jobUrl: string) {
+  onPackageStart(jobUrl: string, jobId: string) {
     try {
-      this.packageListener?.onPackageStart?.(jobUrl);
+      this.packageListener?.onPackageStart?.(jobUrl, jobId);
     } catch (err) {
       logger.warn(
         `Error when calling beforePackage: ${(err as Error).message}`
@@ -124,9 +124,9 @@ export class RedisListener {
     }
   }
 
-  onPackageDone(jobUrl: string) {
+  onPackageDone(jobUrl: string, jobId: string) {
     try {
-      this.packageListener?.onPackageDone?.(jobUrl);
+      this.packageListener?.onPackageDone?.(jobUrl, jobId);
     } catch (err) {
       logger.warn(
         `Error when calling onPackageDone: ${(err as Error).message}`
@@ -135,7 +135,7 @@ export class RedisListener {
   }
 
   //eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onPackageFail(message: string, err: any) {
+  onPackageFail(message: string, err: any, jobId?: string) {
     try {
       this.packageListener?.onPackageFail?.(message, err);
     } catch (e) {
