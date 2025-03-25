@@ -66,13 +66,13 @@ function readRedisConfig(): RedisConfig {
 
 export function readCallbackConfig(): CallbackConfig {
   const url = process.env.CALLBACK_URL
-    ? new URL(process.env.CALLBACK_URL)
-    : undefined;
+    ? URL.parse(process.env.CALLBACK_URL)
+    : null;
   const user =
     url?.username && url.username.length > 0 ? url.username : undefined;
   const password = url && url.password.length > 0 ? url.password : undefined;
   return {
-    url: url != undefined ? stripUserFromUrl(url) : undefined,
+    url: url ? stripUserFromUrl(url) : undefined,
     user: user,
     password: password
   };

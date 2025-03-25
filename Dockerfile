@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=node:18-alpine
+ARG NODE_IMAGE=node:23-alpine
 
 # Note: This target is the one build by CI and published to dockerhub
 FROM ${NODE_IMAGE} AS without-volume-definition

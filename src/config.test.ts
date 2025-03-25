@@ -19,4 +19,13 @@ describe('Test parse callback config', () => {
       password: 'password'
     });
   });
+  it('handles incorrect URLs', () => {
+    process.env.CALLBACK_URL = 'This is not a URL';
+    const conf = readCallbackConfig();
+    expect(conf).toEqual({
+      url: undefined,
+      user: undefined,
+      password: undefined
+    });
+  });
 });
