@@ -21,6 +21,8 @@ export interface RedisConfig {
 
 export interface CallbackConfig {
   url: string;
+  user: string;
+  password: string;
 }
 
 export interface PackagingConfig {
@@ -64,7 +66,9 @@ function readRedisConfig(): RedisConfig {
 
 function readCallbackConfig(): CallbackConfig {
   return {
-    url: process.env.CALLBACK_URL || ''
+    url: process.env.CALLBACK_URL || '',
+    user: process.env.CALLBACK_USER || '',
+    password: process.env.CALLBACK_PASSWORD || ''
   };
 }
 
