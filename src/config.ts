@@ -20,9 +20,9 @@ export interface RedisConfig {
 }
 
 export interface CallbackConfig {
-  url: string;
-  user: string;
-  password: string;
+  url?: string;
+  user?: string;
+  password?: string;
 }
 
 export interface PackagingConfig {
@@ -64,12 +64,22 @@ function readRedisConfig(): RedisConfig {
   };
 }
 
-function readCallbackConfig(): CallbackConfig {
+export function readCallbackConfig(): CallbackConfig {
+  const url = process.env.CALLBACK_URL
+    ? new URL(process.env.CALLBACK_URL)
+    : undefined;
+  const user =
+    url?.username && url.username.length > 0 ? url.username : undefined;
+  const password = url && url.password.length > 0 ? url.password : undefined;
   return {
-    url: process.env.CALLBACK_URL || '',
-    user: process.env.CALLBACK_USER || '',
-    password: process.env.CALLBACK_PASSWORD || ''
+    url: url != undefined ? stripUserFromUrl(url) : undefined,
+    user: user,
+    password: password
   };
+}
+
+function stripUserFromUrl(url: URL): string {
+  return `${url.protocol}//${url.host}${url.pathname}`;
 }
 
 function readPackagingConfig(): PackagingConfig {
