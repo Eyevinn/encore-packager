@@ -39,9 +39,7 @@ package the output of the transcoding job referenced by the message.
 | `AWS_ACCESS_KEY_ID`           | Optional AWS access key id when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                                                                                                                                                           |                          |
 | `AWS_SECRET_ACCESS_KEY`       | Optional AWS secret access key when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                                                                                                                                                       |                          |
 | `S3_ENDPOINT_URL`             | Optional S3 Endpoint URL when `PACKAGE_OUTPUT_FOLDER` is an S3 bucket not on AWS                                                                                                                                                      |                          |
-| `CALLBACK_URL`                | Optional callback service url. If enabled, the packager will send callbacks on packaging success or failure                                                                                                                           |                          |
-| `CALLBACK_USER`               | Optional username for authentication to the service the packager calls back to                                                                                                                                                        |                          |
-| `CALLBACK_PASSWORD`           | Optional password for authentication to the service the packager calls back to                                                                                                                                                        |                          |
+| `CALLBACK_URL`                | Optional callback service url. If enabled, the packager will send callbacks on packaging success or failure. To use baisc auth, provide the URL in the format `https://user:password@hostname/path`                                   |                          |
 
 ##### Stream key templates
 
