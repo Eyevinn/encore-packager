@@ -34,7 +34,8 @@ export async function startListener(config: Config) {
   if (!packageListener && config.callback.url) {
     packageListener = new CallbackListener(
       config.callback.url,
-      config.packaging.encorePassword,
+      config.callback.user,
+      config.callback.password,
       config.packaging.oscAccessToken
     );
   }
