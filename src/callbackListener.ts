@@ -1,10 +1,11 @@
 import { Context } from '@osaas/client-core';
 import logger from './logger';
 import { PackageListener } from './packageListener';
+import { default as PathUtils } from 'path';
 
 export class CallbackListener implements PackageListener {
   constructor(
-    private url: string,
+    private url: URL,
     private authUser?: string,
     private authPassword?: string,
     private oscAccessToken?: string
@@ -15,7 +16,11 @@ export class CallbackListener implements PackageListener {
       this.authUser,
       this.authPassword
     );
-    const response = await fetch(`${this.url}/packagerCallback/success`, {
+    const fetchUrl = new URL(
+      PathUtils.join(this.url.pathname, 'packagerCallback/success'),
+      this.url
+    );
+    const response = await fetch(fetchUrl.toString(), {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
@@ -37,7 +42,11 @@ export class CallbackListener implements PackageListener {
       this.authUser,
       this.authPassword
     );
-    await fetch(`${this.url}/packagerCallback/failure`, {
+    const fetchUrl = new URL(
+      PathUtils.join(this.url.pathname, 'packagerCallback/failure'),
+      this.url
+    );
+    await fetch(fetchUrl.toString(), {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
