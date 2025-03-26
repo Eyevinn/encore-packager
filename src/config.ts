@@ -20,7 +20,7 @@ export interface RedisConfig {
 }
 
 export interface CallbackConfig {
-  url?: string;
+  url?: URL;
   user?: string;
   password?: string;
 }
@@ -71,15 +71,19 @@ export function readCallbackConfig(): CallbackConfig {
   const user =
     url?.username && url.username.length > 0 ? url.username : undefined;
   const password = url && url.password.length > 0 ? url.password : undefined;
-  return {
-    url: url ? stripUserFromUrl(url) : undefined,
-    user: user,
-    password: password
-  };
+  const urlStr = url ? stripUserFromUrl(url) : undefined;
+  if (urlStr) {
+    return {
+      url: urlStr,
+      user: user,
+      password: password
+    };
+  }
+  return {};
 }
 
-function stripUserFromUrl(url: URL): string {
-  return `${url.protocol}//${url.host}${url.pathname}`;
+function stripUserFromUrl(url: URL): URL | null {
+  return URL.parse(`${url.protocol}//${url.host}${url.pathname}`);
 }
 
 function readPackagingConfig(): PackagingConfig {
