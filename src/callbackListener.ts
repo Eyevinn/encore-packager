@@ -11,7 +11,11 @@ export class CallbackListener implements PackageListener {
     private oscAccessToken?: string
   ) {}
 
-  async onPackageDone?(jobUrl: string, jobId: string): Promise<void> {
+  async onPackageDone?(
+    jobUrl: string,
+    jobId: string,
+    outputPath?: string
+  ): Promise<void> {
     const headers = await this.generateHeaders(
       this.authUser,
       this.authPassword
@@ -20,13 +24,17 @@ export class CallbackListener implements PackageListener {
       PathUtils.join(this.url.pathname, 'packagerCallback/success'),
       this.url
     );
+    let body: { url: string; jobId: string; outputPath?: string } = {
+      url: jobUrl,
+      jobId: jobId
+    };
+    if (outputPath) {
+      body = { ...body, outputPath: outputPath };
+    }
     const response = await fetch(fetchUrl.toString(), {
       method: 'POST',
       headers: headers,
-      body: JSON.stringify({
-        url: jobUrl,
-        jobId: jobId
-      })
+      body: JSON.stringify(body)
     });
     if (!response.ok) {
       logger.error(

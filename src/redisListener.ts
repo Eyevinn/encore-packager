@@ -29,7 +29,7 @@ export class RedisListener {
   private client: Awaited<ReturnType<typeof createClient>> | undefined;
   constructor(
     private redisConfig: RedisConfig,
-    private onMessage: (message: QueueMessage) => Promise<void>,
+    private onMessage: (message: QueueMessage) => Promise<string | void>,
     private concurrency: number = 1,
     private packageListener?: PackageListener
   ) {}
@@ -78,8 +78,12 @@ export class RedisListener {
           `Sending message for processing, currently processing ${this.noProcessing} messages`
         );
         this.onPackageStart(parsedMessage.url, parsedMessage.jobId);
-        await this.onMessage(parsedMessage);
-        this.onPackageDone(parsedMessage.url, parsedMessage.jobId);
+        const onMessageResult = await this.onMessage(parsedMessage);
+        this.onPackageDone(
+          parsedMessage.url,
+          parsedMessage.jobId,
+          onMessageResult ? onMessageResult : undefined
+        );
       } finally {
         this.noProcessing--;
       }
@@ -124,9 +128,9 @@ export class RedisListener {
     }
   }
 
-  onPackageDone(jobUrl: string, jobId: string) {
+  onPackageDone(jobUrl: string, jobId: string, outputPath?: string) {
     try {
-      this.packageListener?.onPackageDone?.(jobUrl, jobId);
+      this.packageListener?.onPackageDone?.(jobUrl, jobId, outputPath);
     } catch (err) {
       logger.warn(
         `Error when calling onPackageDone: ${(err as Error).message}`
