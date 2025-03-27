@@ -16,7 +16,10 @@ export class CallbackListener implements PackageListener {
       this.authUser,
       this.authPassword
     );
-    const fetchUrl = new URL('packagerCallback/success', this.url);
+    const fetchUrl = new URL(
+      PathUtils.join(this.url.pathname, 'packagerCallback/success'),
+      this.url
+    );
     const response = await fetch(fetchUrl.toString(), {
       method: 'POST',
       headers: headers,
@@ -39,7 +42,10 @@ export class CallbackListener implements PackageListener {
       this.authUser,
       this.authPassword
     );
-    const fetchUrl = new URL('packagerCallback/failure', this.url);
+    const fetchUrl = new URL(
+      PathUtils.join(this.url.pathname, 'packagerCallback/failure'),
+      this.url
+    );
     await fetch(fetchUrl.toString(), {
       method: 'POST',
       headers: headers,
