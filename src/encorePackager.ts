@@ -37,7 +37,7 @@ const ENCORE_BASIC_AUTH_USER = 'user';
 export class EncorePackager {
   constructor(private config: PackagingConfig) {}
 
-  async package(jobUrl: string) {
+  async package(jobUrl: string): Promise<string> {
     const job = await this.getEncoreJob(jobUrl);
     const inputs = parseInputsFromEncoreJob(job, this.config.streamKeysConfig);
     let serviceAccessToken = undefined;
@@ -61,6 +61,13 @@ export class EncorePackager {
       packageFormatOptions
     } as PackageOptions);
     logger.info(`Finished packaging of job ${job.id} to output folder ${dest}`);
+    if (URL.canParse(dest)) {
+      const parsed = URL.parse(dest);
+      if (parsed) {
+        return parsed.pathname;
+      }
+    }
+    return dest;
   }
 
   getPackageDestination(job: EncoreJob) {
