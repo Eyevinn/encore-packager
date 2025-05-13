@@ -1,5 +1,5 @@
 import { RedisConfig } from './config';
-import { createClient } from 'redis';
+import { createClient, createCluster } from 'redis';
 import { delay } from './util';
 import { Static, Type } from '@sinclair/typebox';
 import { TypeCompiler } from '@sinclair/typebox/compiler';
@@ -27,6 +27,8 @@ export class RedisListener {
   private noProcessing = 0;
 
   private client: Awaited<ReturnType<typeof createClient>> | undefined;
+  private cluster: Awaited<ReturnType<typeof createCluster>> | undefined;
+
   constructor(
     private redisConfig: RedisConfig,
     private onMessage: (message: QueueMessage) => Promise<string | void>,
@@ -39,13 +41,13 @@ export class RedisListener {
     while (this.running) {
       try {
         await this.connect();
+        const client = this.redisConfig.clusterMode
+          ? this.cluster
+          : this.client;
         if (this.noProcessing < this.concurrency) {
           let message;
           try {
-            message = await this.client?.bzPopMin(
-              this.redisConfig.queueName,
-              2000
-            );
+            message = await client?.bzPopMin(this.redisConfig.queueName, 2000);
           } catch (err) {
             logger.error(err);
           }
@@ -96,22 +98,44 @@ export class RedisListener {
   }
 
   async connect() {
-    if (this.client) {
-      return;
+    if (this.redisConfig.clusterMode) {
+      if (this.cluster) {
+        return;
+      }
+      this.cluster = await createCluster({
+        rootNodes: [{ url: this.redisConfig.url }]
+      }).on('error', (err) => {
+        logger.warn(`Redis Cluster Error: ${(err as Error).message}`);
+      });
+      await this.cluster.connect();
+    } else {
+      if (this.client) {
+        return;
+      }
+      this.client = await createClient({ url: this.redisConfig.url })
+        .on('error', (err) => {
+          logger.warn(`Redis Client Error: ${(err as Error).message}`);
+        })
+        .connect();
     }
-    this.client = await createClient({ url: this.redisConfig.url })
-      .on('error', (err) => {
-        logger.warn(`Redis Client Error: ${(err as Error).message}`);
-      })
-      .connect();
   }
 
   async disconnect() {
+    if (this.redisConfig.clusterMode) {
+      await this.cluster?.quit();
+      this.cluster = undefined;
+    }
     await this.client?.quit();
     this.client = undefined;
   }
 
   redisStatus(): 'UP' | 'DOWN' {
+    if (this.redisConfig.clusterMode) {
+      // node-redis doesn't support isReady for cluster mode
+      // https://github.com/redis/node-redis/issues/1855
+      // so we have to hard-code this for now
+      return 'UP';
+    }
     if (!this.client) {
       return 'UP';
     }

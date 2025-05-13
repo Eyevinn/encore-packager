@@ -17,6 +17,7 @@ export interface HealthCheckConfig {
 export interface RedisConfig {
   url: string;
   queueName: string;
+  clusterMode: boolean;
 }
 
 export interface CallbackConfig {
@@ -60,7 +61,8 @@ export interface ManifestNameTemplates {
 function readRedisConfig(): RedisConfig {
   return {
     url: process.env.REDIS_URL || 'redis://localhost:6379',
-    queueName: process.env.REDIS_QUEUE || 'packaging-queue'
+    queueName: process.env.REDIS_QUEUE || 'packaging-queue',
+    clusterMode: process.env.REDIS_CLUSTER_MODE === 'true'
   };
 }
 
