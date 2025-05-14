@@ -41,6 +41,9 @@ export class RedisListener {
     while (this.running) {
       try {
         await this.connect();
+        if (this.redisConfig.clusterMode) {
+          logger.info('Connected to Redis Cluster');
+        }
         const client = this.redisConfig.clusterMode
           ? this.cluster
           : this.client;
