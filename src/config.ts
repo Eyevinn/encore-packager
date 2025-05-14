@@ -62,7 +62,7 @@ function readRedisConfig(): RedisConfig {
   return {
     url: process.env.REDIS_URL || 'redis://localhost:6379',
     queueName: process.env.REDIS_QUEUE || 'packaging-queue',
-    clusterMode: process.env.REDIS_CLUSTER_MODE === 'true'
+    clusterMode: process.env.REDIS_CLUSTER === 'true'
   };
 }
 
