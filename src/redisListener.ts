@@ -44,14 +44,14 @@ export class RedisListener {
         if (this.redisConfig.clusterMode) {
           logger.info('Connected to Redis Cluster');
         }
-        const client = this.redisConfig.clusterMode
-          ? this.cluster
-          : this.client;
+
         if (this.noProcessing < this.concurrency) {
           let message;
           try {
             logger.info('Waiting for message...');
-            message = await client?.bzPopMin(this.redisConfig.queueName, 2000);
+            message = this.redisConfig.clusterMode
+              ? await this.cluster?.bzPopMin(this.redisConfig.queueName, 2000)
+              : await this.client?.bzPopMin(this.redisConfig.queueName, 2000);
           } catch (err) {
             logger.error(err);
           }
