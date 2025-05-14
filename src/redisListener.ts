@@ -50,12 +50,15 @@ export class RedisListener {
         if (this.noProcessing < this.concurrency) {
           let message;
           try {
+            logger.info("Waiting for message...");
             message = await client?.bzPopMin(this.redisConfig.queueName, 2000);
           } catch (err) {
             logger.error(err);
           }
           if (message) {
             this.handleMessage(message.value);
+          } else {
+            logger.info("No message received, waiting...");
           }
         } else {
           await delay(1000);
