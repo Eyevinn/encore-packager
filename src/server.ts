@@ -58,7 +58,9 @@ export async function startListener(config: Config) {
     );
     const server = api({
       redisStatus: () => redisListener.redisStatus(),
-      retryJob: (message) => redisListener.retryJob(message)
+      retryJob: (message) => redisListener.retryJob(message),
+      title: 'Encore Packager API',
+      description: 'API for managing packaging jobs and health checks'
     });
     server.listen(
       { port: config.healthcheck.port, host: config.healthcheck.host },

@@ -15,6 +15,8 @@ const Health = Type.Object({
 interface HealthcheckOptions {
   redisStatus: () => 'UP' | 'DOWN';
   retryJob: (message: Static<typeof QueueMessage>) => Promise<void>;
+  title: string;
+  description: string;
 }
 
 const healthcheck: FastifyPluginCallback<HealthcheckOptions> = (
@@ -101,81 +103,25 @@ export default (opts: HealthcheckOptions) => {
     ignoreTrailingSlash: true
   }).withTypeProvider<TypeBoxTypeProvider>();
 
-  // Register Swagger
   api.register(import('@fastify/swagger'), {
-    openapi: {
-      openapi: '3.0.0',
+    swagger: {
       info: {
-        title: 'Encore Packager API',
-        description: 'API for managing packaging jobs and health checks',
-        version: '1.0.0'
+        title: opts.title,
+        description: opts.description,
+        version: 'v1'
       },
-      servers: [
-        {
-          url: 'http://localhost:3000',
-          description: 'Development server'
-        }
-      ],
-      components: {
-        schemas: {
-          QueueMessage: {
-            type: 'object',
-            properties: {
-              jobId: {
-                type: 'string',
-                description: 'Unique identifier for the job'
-              },
-              url: {
-                type: 'string',
-                description: 'URL to be processed'
-              }
-            },
-            required: ['jobId', 'url']
-          },
-          Health: {
-            type: 'object',
-            properties: {
-              status: {
-                type: 'string',
-                description: 'Overall service status'
-              },
-              redis: {
-                type: 'object',
-                properties: {
-                  status: {
-                    type: 'string',
-                    description: 'Redis connection status'
-                  }
-                }
-              }
-            }
-          }
+      securityDefinitions: {
+        apiKey: {
+          type: 'apiKey',
+          name: 'Authorization',
+          in: 'header',
+          description: 'Bearer <API-KEY>'
         }
       }
     }
   });
-
-  // Register Swagger UI
   api.register(import('@fastify/swagger-ui'), {
-    routePrefix: '/docs',
-    uiConfig: {
-      docExpansion: 'full',
-      deepLinking: false
-    },
-    uiHooks: {
-      onRequest: function (request, reply, next) {
-        next();
-      },
-      preHandler: function (request, reply, next) {
-        next();
-      }
-    },
-    staticCSP: true,
-    transformStaticCSP: (header) => header,
-    transformSpecification: (swaggerObject) => {
-      return swaggerObject;
-    },
-    transformSpecificationClone: true
+    routePrefix: '/docs'
   });
 
   // register the cors plugin, configure it for better security
