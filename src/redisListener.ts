@@ -28,6 +28,9 @@ export class RedisListener {
 
   private client: Awaited<ReturnType<typeof createClient>> | undefined;
   private cluster: Awaited<ReturnType<typeof createCluster>> | undefined;
+  
+  private retryClient: Awaited<ReturnType<typeof createClient>> | undefined;
+  private retryCluster: Awaited<ReturnType<typeof createCluster>> | undefined;
 
   constructor(
     private redisConfig: RedisConfig,
@@ -130,9 +133,13 @@ export class RedisListener {
     if (this.redisConfig.clusterMode) {
       await this.cluster?.quit();
       this.cluster = undefined;
+      await this.retryCluster?.quit();
+      this.retryCluster = undefined;
     }
     await this.client?.quit();
     this.client = undefined;
+    await this.retryClient?.quit();
+    this.retryClient = undefined;
   }
 
   redisStatus(): 'UP' | 'DOWN' {
@@ -177,17 +184,40 @@ export class RedisListener {
     }
   }
 
+  async connectRetryClient() {
+    if (this.redisConfig.clusterMode) {
+      if (this.retryCluster) {
+        return;
+      }
+      this.retryCluster = await createCluster({
+        rootNodes: [{ url: this.redisConfig.url }]
+      }).on('error', (err) => {
+        logger.warn(`Redis Retry Cluster Error: ${(err as Error).message}`);
+      });
+      await this.retryCluster.connect();
+    } else {
+      if (this.retryClient) {
+        return;
+      }
+      this.retryClient = await createClient({ url: this.redisConfig.url })
+        .on('error', (err) => {
+          logger.warn(`Redis Retry Client Error: ${(err as Error).message}`);
+        })
+        .connect();
+    }
+  }
+
   async retryJob(message: QueueMessage): Promise<void> {
-    await this.connect();
+    await this.connectRetryClient();
     const messageStr = JSON.stringify(message);
 
     if (this.redisConfig.clusterMode) {
-      await this.cluster?.zAdd(this.redisConfig.queueName, {
+      await this.retryCluster?.zAdd(this.redisConfig.queueName, {
         score: Date.now(),
         value: messageStr
       });
     } else {
-      await this.client?.zAdd(this.redisConfig.queueName, {
+      await this.retryClient?.zAdd(this.redisConfig.queueName, {
         score: Date.now(),
         value: messageStr
       });
