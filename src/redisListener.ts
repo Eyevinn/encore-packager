@@ -176,4 +176,23 @@ export class RedisListener {
       logger.warn(`Error when calling onPackageFail: ${(e as Error).message}`);
     }
   }
+
+  async retryJob(message: QueueMessage): Promise<void> {
+    await this.connect();
+    const messageStr = JSON.stringify(message);
+
+    if (this.redisConfig.clusterMode) {
+      await this.cluster?.zAdd(this.redisConfig.queueName, {
+        score: Date.now(),
+        value: messageStr
+      });
+    } else {
+      await this.client?.zAdd(this.redisConfig.queueName, {
+        score: Date.now(),
+        value: messageStr
+      });
+    }
+
+    logger.info(`Job retried: ${messageStr}`);
+  }
 }

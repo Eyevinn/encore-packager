@@ -56,7 +56,10 @@ export async function startListener(config: Config) {
     logger.info(
       `Starting healthcheck endpoint on ${config.healthcheck.host}:${config.healthcheck.port}`
     );
-    const server = api({ redisStatus: () => redisListener.redisStatus() });
+    const server = api({
+      redisStatus: () => redisListener.redisStatus(),
+      retryJob: (message) => redisListener.retryJob(message)
+    });
     server.listen(
       { port: config.healthcheck.port, host: config.healthcheck.host },
       (err, address) => {
