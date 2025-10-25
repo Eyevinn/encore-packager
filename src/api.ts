@@ -109,14 +109,6 @@ export default (opts: HealthcheckOptions) => {
         title: opts.title,
         description: opts.description,
         version: 'v1'
-      },
-      securityDefinitions: {
-        apiKey: {
-          type: 'apiKey',
-          name: 'Authorization',
-          in: 'header',
-          description: 'Bearer <API-KEY>'
-        }
       }
     }
   });
