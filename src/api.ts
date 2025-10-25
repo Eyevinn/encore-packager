@@ -83,7 +83,6 @@ const healthcheck: FastifyPluginCallback<HealthcheckOptions> = (
     },
     async (request, reply) => {
       try {
-        validateQueueMessage(request.body);
         await opts.retryJob(request.body);
         reply.send({ message: 'Job queued for retry' });
       } catch (error) {
