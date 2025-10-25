@@ -62,7 +62,7 @@ export class EncorePackager {
     } as PackageOptions);
     logger.info(`Finished packaging of job ${job.id} to output folder ${dest}`);
     if (URL.canParse(dest)) {
-      const parsed = URL.parse(dest);
+      const parsed = new URL(dest);
       if (parsed) {
         return parsed.pathname;
       }

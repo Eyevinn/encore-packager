@@ -67,9 +67,14 @@ function readRedisConfig(): RedisConfig {
 }
 
 export function readCallbackConfig(): CallbackConfig {
-  const url = process.env.CALLBACK_URL
-    ? URL.parse(process.env.CALLBACK_URL)
-    : null;
+  let url: URL | null = null;
+  if (process.env.CALLBACK_URL) {
+    try {
+      url = new URL(process.env.CALLBACK_URL);
+    } catch {
+      url = null;
+    }
+  }
   const user =
     url?.username && url.username.length > 0 ? url.username : undefined;
   const password = url && url.password.length > 0 ? url.password : undefined;
@@ -85,7 +90,11 @@ export function readCallbackConfig(): CallbackConfig {
 }
 
 function stripUserFromUrl(url: URL): URL | null {
-  return URL.parse(`${url.protocol}//${url.host}${url.pathname}`);
+  try {
+    return new URL(`${url.protocol}//${url.host}${url.pathname}`);
+  } catch {
+    return null;
+  }
 }
 
 function readPackagingConfig(): PackagingConfig {
