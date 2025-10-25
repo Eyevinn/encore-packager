@@ -23,7 +23,7 @@ describe('Test parse callback config', () => {
     expect(conf.url).toBeUndefined;
   });
   it('url', () => {
-    const x = URL.parse('http://callback.com');
+    const x = new URL('http://callback.com');
     expect(x).not.toBeNull;
   });
 });
