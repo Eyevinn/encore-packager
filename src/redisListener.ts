@@ -28,7 +28,7 @@ export class RedisListener {
 
   private client: Awaited<ReturnType<typeof createClient>> | undefined;
   private cluster: Awaited<ReturnType<typeof createCluster>> | undefined;
-  
+
   private retryClient: Awaited<ReturnType<typeof createClient>> | undefined;
   private retryCluster: Awaited<ReturnType<typeof createCluster>> | undefined;
 
