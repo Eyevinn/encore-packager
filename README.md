@@ -4,18 +4,62 @@
 
 Wrapper for packaging output of an [encore](https://github.com/svt/encore) transcoding job with Shaka Packager.
 
-Kan be run either as a CLI or as a service. In the latter case it will listen for messages on a redis queue and
+Can be run either as a CLI or as a service. In the latter case it will listen for messages on a redis queue and
 package the output of the transcoding job referenced by the message.
+
+The packager supports two modes of operation:
+
+- **Standard mode**: Package video files using Shaka Packager for DASH/HLS output
+- **Skip packaging mode**: Copy source MP4 files and generate SMIL playlists for direct streaming
 
 ## Requirements
 
-[shaka packager](https://github.com/shaka-project/shaka-packager) needs to be installed. Unless the shaka executable is named `packager` and is in `PATH`, the path to the executable must be provided as an environment variable `SHAKA_PACKAGER_EXECUTABLE`.
+[shaka packager](https://github.com/shaka-project/shaka-packager) needs to be installed for standard packaging mode. Unless the shaka executable is named `packager` and is in `PATH`, the path to the executable must be provided as an environment variable `SHAKA_PACKAGER_EXECUTABLE`.
+
+**Note**: Shaka Packager is not required when using skip packaging mode (`--skip-packaging` or `SKIP_PACKAGING=true`).
 
 ## Usage
 
 ### CLI
 
+#### Standard Packaging Mode
+
+```bash
+# Package files with Shaka Packager (default behavior)
+encore-packager -u https://encore.example.com/api/encoreJobs/123
+```
+
+#### Skip Packaging Mode
+
+```bash
+# Copy MP4 files and generate SMIL playlist
+encore-packager -u https://encore.example.com/api/encoreJobs/123 --skip-packaging
+
+# Using short option
+encore-packager -u https://encore.example.com/api/encoreJobs/123 -s
+
+# Using environment variable
+SKIP_PACKAGING=true encore-packager -u https://encore.example.com/api/encoreJobs/123
+```
+
+In skip packaging mode, the tool will:
+
+- Copy all MP4 video files from the Encore job output
+- Generate a SMIL playlist file (`playlist.smil`) with bitrate information
+- Support both local file copying and HTTP(S) URL downloading
+- Create the same output folder structure as standard packaging mode
+
 ### Running as a service
+
+When running as a service, the packager can be configured to use skip packaging mode for all jobs by setting the `SKIP_PACKAGING` environment variable.
+
+```bash
+# Standard packaging mode (default)
+npm run start
+
+# Skip packaging mode for all jobs
+SKIP_PACKAGING=true npm run start
+```
 
 #### Environment variables
 
@@ -42,6 +86,8 @@ package the output of the transcoding job referenced by the message.
 | `AWS_SECRET_ACCESS_KEY`       | Optional AWS secret access key when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                                                                                                                                                       |                          |
 | `S3_ENDPOINT_URL`             | Optional S3 Endpoint URL when `PACKAGE_OUTPUT_FOLDER` is an S3 bucket not on AWS                                                                                                                                                      |                          |
 | `CALLBACK_URL`                | Optional callback service url. If enabled, the packager will send callbacks on packaging success or failure. To use baisc auth, provide the URL in the format `https://user:password@hostname/path`                                   |                          |
+| `SKIP_PACKAGING`              | Skip Shaka Packager and copy MP4 files with SMIL generation instead. Set to `true` to enable                                                                                                                                          | `false`                  |
+| `SMIL_BASE_URL`               | Optional base URL to include in generated SMIL files. Used for resolving relative video file paths                                                                                                                                    |                          |
 
 ##### Stream key templates
 
@@ -55,6 +101,44 @@ Keywords in the template are replaced with values according to the table below.
 | `$AUDIOIDX$` | Audio stream index, starting from 0                                                                                                               |
 | `$TOTALIDX$` | Total stream index. For video streams, this is the video stream index. For Audio streams, this is audio stream index plus number of video streams |
 | `$BITRATE$`  | Bitrate of the stream                                                                                                                             |
+
+#### SMIL Output Format (Skip Packaging Mode)
+
+When using skip packaging mode, a SMIL (Synchronized Multimedia Integration Language) file is generated alongside the copied MP4 files. The SMIL file provides a playlist format that can be used for adaptive bitrate streaming.
+
+**Example SMIL output structure:**
+
+```
+output-folder/
+├── video_1080p.mp4
+├── video_720p.mp4
+├── video_480p.mp4
+└── playlist.smil
+```
+
+**Example SMIL file content:**
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<smil xmlns="http://www.w3.org/2001/SMIL20/Language">
+  <head>
+    <meta base="https://example.com/videos/" />
+  </head>
+  <body>
+    <switch>
+      <video src="video_1080p.mp4" system-bitrate="5000000" />
+      <video src="video_720p.mp4" system-bitrate="3000000" />
+      <video src="video_480p.mp4" system-bitrate="1500000" />
+    </switch>
+  </body>
+</smil>
+```
+
+The SMIL file includes:
+
+- Bitrate information for each video rendition
+- Base URL for resolving relative paths (configurable via `SMIL_BASE_URL`)
+- Standard SMIL switch element for adaptive playback
 
 #### Starting the service
 

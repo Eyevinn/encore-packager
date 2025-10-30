@@ -39,6 +39,7 @@ export interface PackagingConfig {
   streamKeysConfig: StreamKeyTemplates;
   manifestNamesConfig: ManifestNameTemplates;
   s3EndpointUrl?: string;
+  skipPackaging: boolean;
 }
 
 export const DEFAULT_OUTPUT_SUBFOLDER_TEMPLATE = '$INPUTNAME$/$JOBID$';
@@ -134,7 +135,8 @@ function readPackagingConfig(): PackagingConfig {
     packageFormatOptions,
     streamKeysConfig,
     manifestNamesConfig,
-    s3EndpointUrl: process.env.S3_ENDPOINT_URL
+    s3EndpointUrl: process.env.S3_ENDPOINT_URL,
+    skipPackaging: process.env.SKIP_PACKAGING === 'true'
   };
 }
 

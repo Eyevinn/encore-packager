@@ -15,6 +15,10 @@ cli
     '-r, --redis-listener [redisListener]',
     'Run in service mode, listening to redis queue for jobs'
   )
+  .option(
+    '-s, --skip-packaging',
+    'Skip packaging and copy source MP4 files with SMIL generation'
+  )
   .action(async (options) => {
     if (options.redisListener) {
       if (options.url) {
@@ -26,7 +30,14 @@ cli
         cli.help();
         process.exit(1);
       }
-      await new EncorePackager(readConfig().packaging).package(options.url);
+      const config = readConfig();
+      const packager = new EncorePackager(config.packaging);
+      const skipPackaging = options.skipPackaging;
+      if (skipPackaging) {
+        await packager.copyAndGenerateSmil(options.url);
+      } else {
+        await packager.package(options.url);
+      }
     }
   });
 
