@@ -9,6 +9,7 @@ import { PackagingConfig, StreamKeyTemplates } from './config';
 import { basename, extname } from 'node:path';
 import { Context } from '@osaas/client-core';
 import logger from './logger';
+import { SmilGenerator } from './smilGenerator';
 
 export interface EncoreJob {
   externalId?: string;
@@ -61,6 +62,22 @@ export class EncorePackager {
       packageFormatOptions
     } as PackageOptions);
     logger.info(`Finished packaging of job ${job.id} to output folder ${dest}`);
+    if (URL.canParse(dest)) {
+      const parsed = new URL(dest);
+      if (parsed) {
+        return parsed.pathname;
+      }
+    }
+    return dest;
+  }
+
+  async copyAndGenerateSmil(jobUrl: string): Promise<string> {
+    const job = await this.getEncoreJob(jobUrl);
+    const dest = this.getPackageDestination(job);
+
+    const smilGenerator = new SmilGenerator(this.config);
+    await smilGenerator.generateFromEncoreJob(job, dest, jobUrl);
+
     if (URL.canParse(dest)) {
       const parsed = new URL(dest);
       if (parsed) {

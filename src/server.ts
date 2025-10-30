@@ -45,7 +45,11 @@ export async function startListener(config: Config) {
   const redisListener = new RedisListener(
     config.redis,
     (message) => {
-      return encorePackager.package(message.url);
+      if (config.packaging.skipPackaging) {
+        return encorePackager.copyAndGenerateSmil(message.url);
+      } else {
+        return encorePackager.package(message.url);
+      }
     },
     config.packaging.concurrency,
     packageListener
