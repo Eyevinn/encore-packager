@@ -2,7 +2,7 @@ import { resolve, join } from 'node:path';
 import { basename } from 'node:path';
 import { Context } from '@osaas/client-core';
 import logger from './logger';
-import { copyFile, mkdir, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, writeFile, readdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { PackagingConfig } from './config';
@@ -292,24 +292,65 @@ ${videos}
   ): Promise<void> {
     logger.info(`Uploading package to ${s3Destination}`);
 
-    const args = createS3cmdArgs(
-      ['s3', 'cp', '--recursive', stagingDir, s3Destination],
-      this.config.s3EndpointUrl
-    );
+    // Read directory to get all files
+    const files = await readdir(stagingDir);
 
-    const { status, error } = spawnSync('aws', args, {
-      stdio: 'inherit'
-    });
+    // Separate MP4 files from SMIL file
+    const mp4Files = files.filter((file) => file.endsWith('.mp4'));
+    const smilFile = files.find((file) => file.endsWith('.smil'));
 
-    if (status !== 0) {
-      if (error) {
-        logger.error(`Upload failed: ${error.message}`);
-      } else {
-        logger.error(`Upload failed with exit code ${status}`);
+    // Upload MP4 files first
+    for (const file of mp4Files) {
+      const localPath = resolve(stagingDir, file);
+      const s3Path = `${s3Destination}/${file}`;
+
+      const args = createS3cmdArgs(
+        ['s3', 'cp', localPath, s3Path],
+        this.config.s3EndpointUrl
+      );
+
+      const { status, error } = spawnSync('aws', args, {
+        stdio: 'inherit'
+      });
+
+      if (status !== 0) {
+        if (error) {
+          logger.error(`Upload failed for ${file}: ${error.message}`);
+        } else {
+          logger.error(`Upload failed for ${file} with exit code ${status}`);
+        }
+        throw new Error(`Upload failed for ${file}`);
       }
-      throw new Error('Upload failed');
+
+      logger.info(`Successfully uploaded ${file} to ${s3Path}`);
     }
 
-    logger.info(`Successfully uploaded to ${s3Destination}`);
+    // Upload SMIL file last
+    if (smilFile) {
+      const localPath = resolve(stagingDir, smilFile);
+      const s3Path = `${s3Destination}/${smilFile}`;
+
+      const args = createS3cmdArgs(
+        ['s3', 'cp', localPath, s3Path],
+        this.config.s3EndpointUrl
+      );
+
+      const { status, error } = spawnSync('aws', args, {
+        stdio: 'inherit'
+      });
+
+      if (status !== 0) {
+        if (error) {
+          logger.error(`Upload failed for ${smilFile}: ${error.message}`);
+        } else {
+          logger.error(`Upload failed for ${smilFile} with exit code ${status}`);
+        }
+        throw new Error(`Upload failed for ${smilFile}`);
+      }
+
+      logger.info(`Successfully uploaded ${smilFile} to ${s3Path}`);
+    }
+
+    logger.info(`Successfully uploaded all files to ${s3Destination}`);
   }
 }
