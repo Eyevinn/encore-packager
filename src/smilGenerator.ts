@@ -343,7 +343,9 @@ ${videos}
         if (error) {
           logger.error(`Upload failed for ${smilFile}: ${error.message}`);
         } else {
-          logger.error(`Upload failed for ${smilFile} with exit code ${status}`);
+          logger.error(
+            `Upload failed for ${smilFile} with exit code ${status}`
+          );
         }
         throw new Error(`Upload failed for ${smilFile}`);
       }
