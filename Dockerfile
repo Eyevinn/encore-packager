@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=node:23-alpine
+ARG NODE_IMAGE=node:25-alpine
 
 # Note: This target is the one build by CI and published to dockerhub
 FROM ${NODE_IMAGE} AS without-volume-definition
@@ -15,7 +15,7 @@ COPY --chown=node:node ["src", "./src"]
 # Delete prepare script to avoid errors from husky
 RUN npm pkg delete scripts.prepare \
     && npm ci --omit=dev
-COPY --from=google/shaka-packager:v3.2.0 /usr/bin/packager /usr/bin/packager
+COPY --from=google/shaka-packager:v3.4.2 /usr/bin/packager /usr/bin/packager
 CMD [ "npm", "run", "start", "--", "-r" ]
 
 FROM without-volume-definition
