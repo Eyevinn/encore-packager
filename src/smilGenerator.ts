@@ -5,9 +5,16 @@ import logger from './logger';
 import { copyFile, mkdir, writeFile, readdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { PackagingConfig } from './config';
+import {
+  PackagingConfig,
+  DEFAULT_DOWNLOAD_RETRY_COUNT,
+  DEFAULT_DOWNLOAD_RETRY_DELAY_SECONDS,
+  DEFAULT_DOWNLOAD_MAX_TIME_SECONDS,
+  DEFAULT_DOWNLOAD_APP_RETRY_ATTEMPTS
+} from './config';
 import { rm } from 'node:fs/promises';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { delay } from './util';
 
 export interface EncoreJob {
   externalId?: string;
@@ -105,13 +112,29 @@ export class SmilGenerator {
       const filename = basename(sourceUrl);
       const destPath = resolve(workingDir, filename);
 
-      logger.info(`Downloading ${sourceUrl} to ${destPath}`);
+      // Resume support: if a previous attempt for this job already
+      // downloaded this exact file into this working directory (verified by
+      // comparing to the expected size from the Encore job output, not just
+      // presence, since a prior failed/interrupted curl run can leave a
+      // partial file behind), skip re-downloading it.
+      if (this.isFileAlreadyDownloaded(destPath, mp4File.fileSize)) {
+        logger.info(
+          `Skipping download of ${sourceUrl}, ${destPath} already exists with expected size`
+        );
+      } else {
+        logger.info(`Downloading ${sourceUrl} to ${destPath}`);
 
-      // Download the MP4 file from the Encore job output
-      const source = this.config.oscAccessToken
-        ? new URL(jobUrl).origin
-        : undefined;
-      await this.downloadFile(sourceUrl, destPath, serviceAccessToken, source);
+        // Download the MP4 file from the Encore job output
+        const source = this.config.oscAccessToken
+          ? new URL(jobUrl).origin
+          : undefined;
+        await this.downloadFileWithRetry(
+          sourceUrl,
+          destPath,
+          serviceAccessToken,
+          source
+        );
+      }
 
       smilEntries.push({
         file: filename,
@@ -140,6 +163,86 @@ export class SmilGenerator {
     );
 
     return destination;
+  }
+
+  /**
+   * Returns true if a file for a previous, now-retried job attempt already
+   * exists at destPath and its size matches the expected size reported by
+   * Encore. Only trust presence when the size matches: curl writes directly
+   * to destPath, so a file left behind by an aborted/failed attempt can be
+   * present but incomplete, and treating that as "done" would ship a
+   * corrupted rendition. When expectedSize is falsy (unknown), we cannot
+   * safely verify completeness, so we always re-download.
+   */
+  private isFileAlreadyDownloaded(
+    destPath: string,
+    expectedSize?: number
+  ): boolean {
+    if (!expectedSize || !existsSync(destPath)) {
+      return false;
+    }
+    try {
+      return statSync(destPath).size === expectedSize;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Wraps downloadFile with a bounded number of application-level retries
+   * and exponential backoff. curl's own --retry flags already absorb
+   * transient network blips (connection reset, connection refused) inside a
+   * single curl invocation; this is an outer safety net for the case where a
+   * file still fails after curl has exhausted its own retries, so one bad
+   * file doesn't abort the entire packaging job.
+   */
+  private async downloadFileWithRetry(
+    url: string,
+    destPath: string,
+    serviceAccessToken?: string,
+    source?: string
+  ): Promise<void> {
+    const maxAttempts = Math.max(
+      1,
+      (this.config.downloadAppRetryAttempts ??
+        DEFAULT_DOWNLOAD_APP_RETRY_ATTEMPTS) + 1
+    );
+    const baseDelaySeconds =
+      this.config.downloadRetryDelaySeconds ??
+      DEFAULT_DOWNLOAD_RETRY_DELAY_SECONDS;
+
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        if (attempt > 1) {
+          logger.info(
+            `Retrying download of ${url} (attempt ${attempt}/${maxAttempts})`
+          );
+        }
+        await this.downloadFile(url, destPath, serviceAccessToken, source);
+        return;
+      } catch (err) {
+        lastError = err;
+        logger.error(
+          `Download attempt ${attempt}/${maxAttempts} failed for ${url}: ${
+            (err as Error)?.message
+          }`
+        );
+        if (attempt < maxAttempts) {
+          const backoffSeconds = baseDelaySeconds * Math.pow(2, attempt - 1);
+          logger.info(
+            `Waiting ${backoffSeconds}s before retrying download of ${url}`
+          );
+          await delay(backoffSeconds * 1000);
+        }
+      }
+    }
+
+    throw new Error(
+      `Failed to download ${url} after ${maxAttempts} attempts: ${
+        (lastError as Error)?.message
+      }`
+    );
   }
 
   private async downloadFile(
@@ -197,7 +300,32 @@ export class SmilGenerator {
     destPath: string,
     serviceAccessToken?: string
   ): Promise<void> {
-    const args = ['-s', '-S', '-L', '-o', destPath];
+    const retryCount =
+      this.config.downloadRetryCount ?? DEFAULT_DOWNLOAD_RETRY_COUNT;
+    const retryDelaySeconds =
+      this.config.downloadRetryDelaySeconds ??
+      DEFAULT_DOWNLOAD_RETRY_DELAY_SECONDS;
+    const maxTimeSeconds =
+      this.config.downloadMaxTimeSeconds ?? DEFAULT_DOWNLOAD_MAX_TIME_SECONDS;
+
+    const args = [
+      '-s',
+      '-S',
+      '-L',
+      // Let curl self-heal transient network errors (e.g. curl exit 56
+      // "Recv failure: Connection reset by peer", or a refused connection)
+      // within a single invocation before we fall back to an
+      // application-level retry.
+      '--retry',
+      `${retryCount}`,
+      '--retry-connrefused',
+      '--retry-delay',
+      `${retryDelaySeconds}`,
+      '--max-time',
+      `${maxTimeSeconds}`,
+      '-o',
+      destPath
+    ];
 
     // Add JWT authentication if available
     if (serviceAccessToken) {

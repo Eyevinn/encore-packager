@@ -40,9 +40,24 @@ export interface PackagingConfig {
   manifestNamesConfig: ManifestNameTemplates;
   s3EndpointUrl?: string;
   skipPackaging: boolean;
+  downloadRetryCount: number;
+  downloadRetryDelaySeconds: number;
+  downloadMaxTimeSeconds: number;
+  downloadAppRetryAttempts: number;
 }
 
 export const DEFAULT_OUTPUT_SUBFOLDER_TEMPLATE = '$INPUTNAME$/$JOBID$';
+
+// Renditions can be large (800MB-2GB+), so curl's --max-time needs enough
+// headroom to survive a full transfer over a slow/congested link, not just a
+// LAN-speed copy.
+export const DEFAULT_DOWNLOAD_RETRY_COUNT = 3;
+export const DEFAULT_DOWNLOAD_RETRY_DELAY_SECONDS = 2;
+export const DEFAULT_DOWNLOAD_MAX_TIME_SECONDS = 900;
+// Application-level retry attempts, on top of (and independent from)
+// curl's own --retry above. This is the safety net for a file that still
+// fails after curl has exhausted its own transient-error retries.
+export const DEFAULT_DOWNLOAD_APP_RETRY_ATTEMPTS = 3;
 
 export interface StreamKeyTemplates {
   video: string;
@@ -136,7 +151,22 @@ function readPackagingConfig(): PackagingConfig {
     streamKeysConfig,
     manifestNamesConfig,
     s3EndpointUrl: process.env.S3_ENDPOINT_URL,
-    skipPackaging: process.env.SKIP_PACKAGING === 'true'
+    skipPackaging: process.env.SKIP_PACKAGING === 'true',
+    downloadRetryCount: parseInt(
+      process.env.DOWNLOAD_RETRY_COUNT || `${DEFAULT_DOWNLOAD_RETRY_COUNT}`
+    ),
+    downloadRetryDelaySeconds: parseInt(
+      process.env.DOWNLOAD_RETRY_DELAY_SECONDS ||
+        `${DEFAULT_DOWNLOAD_RETRY_DELAY_SECONDS}`
+    ),
+    downloadMaxTimeSeconds: parseInt(
+      process.env.DOWNLOAD_MAX_TIME_SECONDS ||
+        `${DEFAULT_DOWNLOAD_MAX_TIME_SECONDS}`
+    ),
+    downloadAppRetryAttempts: parseInt(
+      process.env.DOWNLOAD_APP_RETRY_ATTEMPTS ||
+        `${DEFAULT_DOWNLOAD_APP_RETRY_ATTEMPTS}`
+    )
   };
 }
 
