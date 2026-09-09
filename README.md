@@ -1,6 +1,7 @@
 # Encore packager
 
 ---
+
 <div align="center">
 
 ## Quick Demo: Open Source Cloud
