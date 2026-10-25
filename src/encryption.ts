@@ -236,11 +236,20 @@ export function collectKeyMaterial(parsed: unknown): string[] {
 }
 
 /**
+ * Every quoting form a member name or value can arrive in: a plain single or
+ * double quote, or a backslash-escaped one as found in a double-encoded
+ * payload (`"{\"key\":\"<hex>\"}"`).
+ */
+const QUOTE = String.raw`(?:\\["']|["'])`;
+
+/**
  * Matches a `key` member and its value in JSON-ish or free-form text, however
- * the member is written: `"key": "<hex>"`, `"key":<hex>` (unquoted, so the
- * message never parses), `key=<hex>` (a packager command line) and the
- * truncated forms that appear inside a `JSON.parse` error message, which
- * quotes the offending fragment of the input.
+ * the member is written: `"key": "<hex>"`, `'key':'<hex>'`, `\"key\":\"<hex>\"`
+ * (double-encoded), `"key":<hex>` (unquoted, so the message never parses),
+ * `key=<hex>` (a packager command line) and the truncated forms that appear
+ * inside a `JSON.parse` error message, which quotes the offending fragment of
+ * the input. The member name is matched case-insensitively, so `Key` and `KEY`
+ * are covered too.
  *
  * `keyId`, `key_id` and `keys` are deliberately not matched: the member name
  * must end immediately after `key`, so key ids and labels stay readable in
@@ -250,20 +259,71 @@ export function collectKeyMaterial(parsed: unknown): string[] {
  * scope.
  */
 function keyMemberPattern(): RegExp {
-  const name = String.raw`(?:"key"|key)(?![\w"'-])\s*[:=]\s*`;
-  const value = String.raw`"(?:[^"\\]|\\.)*"?|[^\s,}\]{"']+`;
-  return new RegExp(`(${name})(${value})`, 'g');
+  const name = String.raw`(?:${QUOTE}key${QUOTE}|key)(?![\w-])\s*[:=]\s*`;
+  const value = [
+    // escaped-quote delimited, as in a double-encoded payload
+    String.raw`\\"(?:(?!\\").)*(?:\\")?`,
+    String.raw`\\'(?:(?!\\').)*(?:\\')?`,
+    // plainly quoted, possibly truncated by a parse error
+    String.raw`"(?:[^"\\]|\\.)*"?`,
+    String.raw`'(?:[^'\\]|\\.)*'?`,
+    // bare, unquoted value
+    String.raw`[^\s,}\]{"'\\]+`
+  ].join('|');
+  return new RegExp(`(${name})(${value})`, 'gi');
+}
+
+/** Strips one layer of quoting, escaped or not, from a matched member value. */
+function unquoteMemberValue(raw: string): string {
+  const opening = new RegExp(`^${QUOTE}`).exec(raw);
+  if (!opening) {
+    return raw;
+  }
+  return raw.slice(opening[0].length).replace(new RegExp(`${QUOTE}$`), '');
+}
+
+/**
+ * Matches a standalone 32-hex-character token — the shape the schema pins both
+ * `key` and `keyId` to (`HEX_16_BYTES`) — together with a preceding key id
+ * member name, when there is one.
+ */
+function keyShapedTokenPattern(): RegExp {
+  const keyIdName = String.raw`(?<![\w-])${QUOTE}?(?:keyid|key_id|kid)${QUOTE}?\s*[:=]\s*${QUOTE}?`;
+  const token = String.raw`(?<![0-9a-fA-F])[0-9a-fA-F]{32}(?![0-9a-fA-F])`;
+  return new RegExp(`(${keyIdName})?(${token})`, 'gi');
+}
+
+/**
+ * Value-shaped sweep: redacts every standalone 32-hex token left in the text,
+ * whatever member name (or none at all) it sits behind. This is the last line
+ * of defence for a message whose member names do not have a shape this module
+ * can recognise.
+ *
+ * A token written as a key id member value is left readable, because key ids
+ * are not secret and are needed to debug a job — unless the same value was
+ * also recovered as key material, in which case it is redacted anyway.
+ */
+function redactKeyShapedTokens(text: string, keyMaterial: string[]): string {
+  const known = new Set(keyMaterial);
+  return text.replace(
+    keyShapedTokenPattern(),
+    (match, keyIdName: string | undefined, token: string) =>
+      keyIdName && !known.has(token) ? match : `${keyIdName ?? ''}${REDACTED}`
+  );
 }
 
 /**
  * Redacts the value of every `key` member found in arbitrary text, whether or
- * not the value is quoted and whether or not the text is valid JSON. Used as
- * the last line of defence on anything derived from a queue message: a
- * malformed message, or a parse error quoting part of one, must not leak key
- * material even when the key value could never be read as a string.
+ * not the value is quoted and whether or not the text is valid JSON, and then
+ * sweeps up any remaining value of the shape a key has. Used as the last line
+ * of defence on anything derived from a queue message: a malformed message, or
+ * a parse error quoting part of one, must not leak key material even when the
+ * key value could never be read as a string.
  */
 export function redactKeyMembersInText(text: string): string {
-  return text.replace(keyMemberPattern(), `$1"${REDACTED}"`);
+  const keyMaterial = collectKeyMaterialFromText(text);
+  const withoutKeyMembers = text.replace(keyMemberPattern(), `$1"${REDACTED}"`);
+  return redactKeyShapedTokens(withoutKeyMembers, keyMaterial);
 }
 
 /** Minimum length for a key value recovered from raw text to be substituted
@@ -278,8 +338,7 @@ const MIN_RECOVERED_KEY_LENGTH = 8;
 export function collectKeyMaterialFromText(text: string): string[] {
   const found: string[] = [];
   for (const match of text.matchAll(keyMemberPattern())) {
-    const raw = match[2];
-    const value = raw.startsWith('"') ? raw.slice(1).replace(/"$/, '') : raw;
+    const value = unquoteMemberValue(match[2]);
     if (value.length >= MIN_RECOVERED_KEY_LENGTH && value !== REDACTED) {
       found.push(value);
     }

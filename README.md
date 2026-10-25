@@ -122,9 +122,11 @@ Unknown members are rejected rather than ignored, on the queue and on
 quietly packaging it without a clear lead.
 
 Key values are redacted (`[REDACTED]`) in every log line, error message and
-retry log, so key material only ever exists in the queue message itself. That
-holds for a malformed message too, including one where the key value is not
-quoted and the message never parses.
+retry log, so key material only ever leaves this package in the packaging call
+itself. That holds for a malformed message too: redaction works on the member
+name where it can, and otherwise falls back to the value shape, so a message
+that never parses — an unquoted, single-quoted or double-encoded key value, or
+a bare 32-hex token — does not leak the key either.
 
 A job that asks for encryption fails explicitly, rather than producing
 unencrypted output, when the installed Shaka Packager wrapper does not support

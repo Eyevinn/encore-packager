@@ -97,6 +97,49 @@ describe('Malformed messages carrying key material', () => {
     expect(logged.join('\n')).not.toContain(KEY_FRAGMENT);
   });
 
+  // The key is a repeating pattern, so check every window of it rather than a
+  // single fragment: no 8-character run of the key may survive anywhere.
+  const expectNoKeyFragment = (text: string) => {
+    for (let i = 0; i + KEY_FRAGMENT.length <= KEY.length; i++) {
+      expect(text).not.toContain(KEY.slice(i, i + KEY_FRAGMENT.length));
+    }
+  };
+
+  it.each([
+    [
+      'single-quoted, unparseable message',
+      `{'jobId':'j1','url':'http://localhost/job','key':'${KEY}'}`
+    ],
+    [
+      'double-encoded payload with escaped quotes',
+      JSON.stringify({
+        jobId: 'id',
+        payload:
+          `{"encryption":{"scheme":"cenc","keys":` +
+          `[{"keyId":"${KEY_ID}","key":"${KEY}"}]}}`
+      })
+    ],
+    [
+      'member name in a different case',
+      `{"jobId":"id","encryption":{"keys":[{"Key":"${KEY}"}]}}`
+    ],
+    ['bare standalone key-shaped token', `queue message rejected: ${KEY}`]
+  ])(
+    'Never logs or reports a key value in a %s',
+    async (_name: string, message: string) => {
+      const onPackageFail = jest.fn();
+      const listener = new RedisListener(redisConfig, jest.fn(), 1, {
+        onPackageFail
+      });
+
+      await listener.handleMessage(message);
+
+      expect(onPackageFail).toHaveBeenCalled();
+      expectNoKeyFragment(logged.join('\n'));
+      expectNoKeyFragment(JSON.stringify(onPackageFail.mock.calls));
+    }
+  );
+
   it('Never logs a key value written without quotes or spacing variants', async () => {
     const variants = [
       `{"jobId":"id","encryption":{"keys":[{"key": ${KEY}`,
