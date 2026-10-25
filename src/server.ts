@@ -46,9 +46,12 @@ export async function startListener(config: Config) {
     config.redis,
     (message) => {
       if (config.packaging.skipPackaging) {
-        return encorePackager.copyAndGenerateSmil(message.url);
+        return encorePackager.copyAndGenerateSmil(
+          message.url,
+          message.encryption
+        );
       } else {
-        return encorePackager.package(message.url);
+        return encorePackager.package(message.url, message.encryption);
       }
     },
     config.packaging.concurrency,

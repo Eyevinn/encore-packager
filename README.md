@@ -73,6 +73,57 @@ npm run start
 SKIP_PACKAGING=true npm run start
 ```
 
+#### Queue message format
+
+Each message on the redis queue references one encore job:
+
+```json
+{
+  "jobId": "e5e76304-744c-41d6-85f7-69007b3b1a65",
+  "url": "http://encore:8080/encoreJobs/e5e76304-744c-41d6-85f7-69007b3b1a65"
+}
+```
+
+A message may also carry an optional `encryption` object, which applies to that
+job only and is never read from the instance configuration:
+
+```json
+{
+  "jobId": "e5e76304-744c-41d6-85f7-69007b3b1a65",
+  "url": "http://encore:8080/encoreJobs/e5e76304-744c-41d6-85f7-69007b3b1a65",
+  "encryption": {
+    "scheme": "cenc",
+    "keys": [
+      {
+        "label": "HD",
+        "keyId": "00112233445566778899aabbccddeeff",
+        "key": "<32 hex characters>"
+      }
+    ],
+    "protectionSystems": ["widevine", "playready"],
+    "pssh": { "widevine": "<base64>" },
+    "hlsKeyUri": "skd://00112233445566778899aabbccddeeff",
+    "clearLead": 0
+  }
+}
+```
+
+| Field               | Required | Description                                                                                |
+| ------------------- | -------- | ------------------------------------------------------------------------------------------ |
+| `scheme`            | yes      | `cenc` or `cbcs`                                                                           |
+| `keys`              | yes      | At least one key. `keyId` and `key` are 16 bytes as 32 hex characters, `label` is optional |
+| `protectionSystems` | no       | Any of `widevine`, `playready`, `fairplay`, `marlin`, `common`                             |
+| `pssh`              | no       | Pre-built PSSH boxes, base64                                                               |
+| `hlsKeyUri`         | no       | Key URI to signal in the HLS playlists                                                     |
+| `clearLead`         | no       | Seconds of unencrypted lead-in                                                             |
+
+Key values are redacted (`[REDACTED]`) in every log line, error message and
+retry log, so key material only ever exists in the queue message itself.
+
+A job that asks for encryption fails explicitly, rather than producing
+unencrypted output, when the installed Shaka Packager wrapper does not support
+encryption or when the instance runs with `SKIP_PACKAGING=true`.
+
 #### Environment variables
 
 | Variable                      | Description                                                                                                                                                                                                                           | Default value            |
