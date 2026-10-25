@@ -40,6 +40,7 @@ export interface PackagingConfig {
   manifestNamesConfig: ManifestNameTemplates;
   s3EndpointUrl?: string;
   skipPackaging: boolean;
+  includeInputSources: boolean;
   downloadRetryCount: number;
   downloadRetryDelaySeconds: number;
   downloadMaxTimeSeconds: number;
@@ -152,6 +153,10 @@ function readPackagingConfig(): PackagingConfig {
     manifestNamesConfig,
     s3EndpointUrl: process.env.S3_ENDPOINT_URL,
     skipPackaging: process.env.SKIP_PACKAGING === 'true',
+    // The packaged output contains only segments, playlists and manifests by
+    // default. Opting in restores the previous behaviour of leaving the input
+    // source renditions in the output as well.
+    includeInputSources: process.env.INCLUDE_INPUT_SOURCES === 'true',
     downloadRetryCount: parseInt(
       process.env.DOWNLOAD_RETRY_COUNT || `${DEFAULT_DOWNLOAD_RETRY_COUNT}`
     ),
