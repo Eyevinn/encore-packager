@@ -118,10 +118,13 @@ export class RedisListener {
     } catch (e) {
       // An error thrown further down the stack can carry the raw keys, so
       // scrub this job's key material from both the log line and whatever is
-      // handed to the package listener.
+      // handed to the package listener. The raw message is passed as well:
+      // when JSON.parse is what failed, parsedMessage is undefined and the
+      // parse error quotes a fragment of the message itself.
       const detail = redactKeyMaterialFor(
         `${(e as Error)?.message}`,
-        parsedMessage
+        parsedMessage,
+        message
       );
       logger.error(`Error when handling message ${safeMessage}: ${detail}`);
       const safeError =

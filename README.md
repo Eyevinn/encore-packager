@@ -117,8 +117,14 @@ job only and is never read from the instance configuration:
 | `hlsKeyUri`         | no       | Key URI to signal in the HLS playlists                                                     |
 | `clearLead`         | no       | Seconds of unencrypted lead-in                                                             |
 
+Unknown members are rejected rather than ignored, on the queue and on
+`POST /retry` alike: a misspelled `clear_lead` fails the job instead of
+quietly packaging it without a clear lead.
+
 Key values are redacted (`[REDACTED]`) in every log line, error message and
-retry log, so key material only ever exists in the queue message itself.
+retry log, so key material only ever exists in the queue message itself. That
+holds for a malformed message too, including one where the key value is not
+quoted and the message never parses.
 
 A job that asks for encryption fails explicitly, rather than producing
 unencrypted output, when the installed Shaka Packager wrapper does not support

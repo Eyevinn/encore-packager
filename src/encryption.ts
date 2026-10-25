@@ -236,33 +236,97 @@ export function collectKeyMaterial(parsed: unknown): string[] {
 }
 
 /**
+ * Matches a `key` member and its value in JSON-ish or free-form text, however
+ * the member is written: `"key": "<hex>"`, `"key":<hex>` (unquoted, so the
+ * message never parses), `key=<hex>` (a packager command line) and the
+ * truncated forms that appear inside a `JSON.parse` error message, which
+ * quotes the offending fragment of the input.
+ *
+ * `keyId`, `key_id` and `keys` are deliberately not matched: the member name
+ * must end immediately after `key`, so key ids and labels stay readable in
+ * logs.
+ *
+ * A fresh RegExp per call keeps `lastIndex` state out of the shared module
+ * scope.
+ */
+function keyMemberPattern(): RegExp {
+  const name = String.raw`(?:"key"|key)(?![\w"'-])\s*[:=]\s*`;
+  const value = String.raw`"(?:[^"\\]|\\.)*"?|[^\s,}\]{"']+`;
+  return new RegExp(`(${name})(${value})`, 'g');
+}
+
+/**
+ * Redacts the value of every `key` member found in arbitrary text, whether or
+ * not the value is quoted and whether or not the text is valid JSON. Used as
+ * the last line of defence on anything derived from a queue message: a
+ * malformed message, or a parse error quoting part of one, must not leak key
+ * material even when the key value could never be read as a string.
+ */
+export function redactKeyMembersInText(text: string): string {
+  return text.replace(keyMemberPattern(), `$1"${REDACTED}"`);
+}
+
+/** Minimum length for a key value recovered from raw text to be substituted
+ * out of unrelated text, so a short or junk value cannot garble a message. */
+const MIN_RECOVERED_KEY_LENGTH = 8;
+
+/**
+ * Collects key values from raw, possibly unparseable text, for example the
+ * serialised queue message when `JSON.parse` has failed. Complements
+ * `collectKeyMaterial`, which needs a successfully parsed message.
+ */
+export function collectKeyMaterialFromText(text: string): string[] {
+  const found: string[] = [];
+  for (const match of text.matchAll(keyMemberPattern())) {
+    const raw = match[2];
+    const value = raw.startsWith('"') ? raw.slice(1).replace(/"$/, '') : raw;
+    if (value.length >= MIN_RECOVERED_KEY_LENGTH && value !== REDACTED) {
+      found.push(value);
+    }
+  }
+  return found;
+}
+
+/**
  * Removes any key material belonging to the given parsed message from
  * free-form text, for example an error thrown further down the stack.
+ *
+ * `rawMessage` is the serialised message the text relates to, if available.
+ * It is needed because the message may have failed to parse — in which case
+ * `parsed` is undefined and carries no keys at all — while the raw string, and
+ * any parse error quoting it, still hold the key.
  */
-export function redactKeyMaterialFor(text: string, parsed: unknown): string {
-  return collectKeyMaterial(parsed).reduce(
+export function redactKeyMaterialFor(
+  text: string,
+  parsed: unknown,
+  rawMessage?: string
+): string {
+  const keys = [
+    ...collectKeyMaterial(parsed),
+    ...(rawMessage ? collectKeyMaterialFromText(rawMessage) : [])
+  ];
+  const withoutKeys = keys.reduce(
     (acc, key) => acc.split(key).join(REDACTED),
     text
   );
+  return redactKeyMembersInText(withoutKeys);
 }
-
-const KEY_FIELD_PATTERN = /("key"\s*:\s*)"(?:[^"\\]|\\.)*"/g;
 
 /**
  * Redacts key material in a raw string, typically the serialised queue
- * message. Parses it as JSON when possible and falls back to replacing any
- * `"key": "..."` member, so a malformed message cannot leak key material
- * either.
+ * message. Parses it as JSON when possible and always falls back to replacing
+ * any `key` member, quoted or not, so a malformed message cannot leak key
+ * material either.
  */
 export function redactMessageString(message: string): string {
   try {
     const parsed = JSON.parse(message);
     const redacted = redactEncryptionIn(parsed);
     if (redacted !== parsed) {
-      return JSON.stringify(redacted);
+      return redactKeyMembersInText(JSON.stringify(redacted));
     }
-    return message.replace(KEY_FIELD_PATTERN, `$1"${REDACTED}"`);
+    return redactKeyMembersInText(message);
   } catch {
-    return message.replace(KEY_FIELD_PATTERN, `$1"${REDACTED}"`);
+    return redactKeyMembersInText(message);
   }
 }
