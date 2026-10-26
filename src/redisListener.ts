@@ -16,17 +16,53 @@ export const QueueMessage = Type.Object({
   url: Type.String(),
   // Per-job encryption options, applied to this job only. Never read from
   // instance config.
-  encryption: Type.Optional(EncryptionOptions)
+  encryption: Type.Optional(EncryptionOptions),
+  // Per-job callback URL, used for this job instead of the instance-wide
+  // CALLBACK_URL. Omitted means the configured callback is used, as before.
+  // Basic-auth credentials may be embedded as userinfo, the same format
+  // CALLBACK_URL accepts: https://user:password@hostname/path
+  callbackUrl: Type.Optional(Type.String({ minLength: 1 }))
 });
 
 export type QueueMessage = Static<typeof QueueMessage>;
 
 const QueueMessageChecker = TypeCompiler.Compile(QueueMessage);
 
+const CALLBACK_URL_PROTOCOLS = ['http:', 'https:'];
+
+/**
+ * A callback URL has to be absolute and http(s): `CallbackListener` resolves
+ * the success/failure path against it and hands it to `fetch`, so a relative
+ * or non-http value would only fail later, after the job has been packaged.
+ */
+/**
+ * Basic-auth credentials may be embedded in a callback URL as userinfo, so a
+ * message carrying one must not be logged verbatim. Applied on top of the
+ * key-material redaction, for the same reason: what leaves this package in a
+ * log line or an error must not include a secret.
+ */
+export function redactUrlCredentials(message: string): string {
+  return message.replace(/(https?:\/\/)[^/\s"'@]+@/gi, '$1[REDACTED]@');
+}
+
+export function isValidCallbackUrl(callbackUrl: string): boolean {
+  if (!URL.canParse(callbackUrl)) {
+    return false;
+  }
+  return CALLBACK_URL_PROTOCOLS.includes(new URL(callbackUrl).protocol);
+}
+
 export function validateQueueMessage(
   message: unknown
 ): asserts message is QueueMessage {
-  if (!QueueMessageChecker.Check(message)) {
+  if (QueueMessageChecker.Check(message)) {
+    if (message.callbackUrl && !isValidCallbackUrl(message.callbackUrl)) {
+      throw new Error(
+        'Invalid message: /callbackUrl must be an absolute http or https URL'
+      );
+    }
+    return;
+  } else {
     // Formatted from path and message only: the rejected values are never
     // included, so an invalid encryption key cannot leak into logs or an API
     // error response.
@@ -51,8 +87,20 @@ export class RedisListener {
     private redisConfig: RedisConfig,
     private onMessage: (message: QueueMessage) => Promise<string | void>,
     private concurrency: number = 1,
-    private packageListener?: PackageListener
+    private packageListener?: PackageListener,
+    // Optional per-job listener resolution. Returning undefined (or leaving
+    // this out entirely) keeps the instance-wide `packageListener`.
+    private packageListenerFor?: (
+      message: QueueMessage
+    ) => PackageListener | undefined
   ) {}
+
+  listenerFor(message?: QueueMessage): PackageListener | undefined {
+    if (!message || !this.packageListenerFor) {
+      return this.packageListener;
+    }
+    return this.packageListenerFor(message) ?? this.packageListener;
+  }
 
   async start() {
     this.running = true;
@@ -94,23 +142,26 @@ export class RedisListener {
   }
 
   async handleMessage(message: string) {
-    const safeMessage = redactMessageString(message);
+    const safeMessage = redactUrlCredentials(redactMessageString(message));
     let parsedMessage: unknown;
+    let listener: PackageListener | undefined = this.packageListener;
     try {
       logger.info(`Received message: ${safeMessage}`);
       parsedMessage = JSON.parse(message);
       validateQueueMessage(parsedMessage);
+      listener = this.listenerFor(parsedMessage);
       this.noProcessing++;
       try {
         logger.info(
           `Sending message for processing, currently processing ${this.noProcessing} messages`
         );
-        this.onPackageStart(parsedMessage.url, parsedMessage.jobId);
+        this.onPackageStart(parsedMessage.url, parsedMessage.jobId, listener);
         const onMessageResult = await this.onMessage(parsedMessage);
         await this.onPackageDone(
           parsedMessage.url,
           parsedMessage.jobId,
-          onMessageResult ? onMessageResult : undefined
+          onMessageResult ? onMessageResult : undefined,
+          listener
         );
       } finally {
         this.noProcessing--;
@@ -121,15 +172,13 @@ export class RedisListener {
       // handed to the package listener. The raw message is passed as well:
       // when JSON.parse is what failed, parsedMessage is undefined and the
       // parse error quotes a fragment of the message itself.
-      const detail = redactKeyMaterialFor(
-        `${(e as Error)?.message}`,
-        parsedMessage,
-        message
+      const detail = redactUrlCredentials(
+        redactKeyMaterialFor(`${(e as Error)?.message}`, parsedMessage, message)
       );
       logger.error(`Error when handling message ${safeMessage}: ${detail}`);
       const safeError =
         detail === (e as Error)?.message ? e : new Error(detail);
-      await this.onPackageFail(safeMessage, safeError);
+      await this.onPackageFail(safeMessage, safeError, undefined, listener);
     }
   }
 
@@ -182,9 +231,13 @@ export class RedisListener {
     return this.client.isReady ? 'UP' : 'DOWN';
   }
 
-  onPackageStart(jobUrl: string, jobId: string) {
+  onPackageStart(
+    jobUrl: string,
+    jobId: string,
+    listener: PackageListener | undefined = this.packageListener
+  ) {
     try {
-      this.packageListener?.onPackageStart?.(jobUrl, jobId);
+      listener?.onPackageStart?.(jobUrl, jobId);
     } catch (err) {
       logger.warn(
         `Error when calling beforePackage: ${(err as Error).message}`
@@ -192,9 +245,14 @@ export class RedisListener {
     }
   }
 
-  async onPackageDone(jobUrl: string, jobId: string, outputPath?: string) {
+  async onPackageDone(
+    jobUrl: string,
+    jobId: string,
+    outputPath?: string,
+    listener: PackageListener | undefined = this.packageListener
+  ) {
     try {
-      await this.packageListener?.onPackageDone?.(jobUrl, jobId, outputPath);
+      await listener?.onPackageDone?.(jobUrl, jobId, outputPath);
     } catch (err) {
       logger.warn(
         `Error when calling onPackageDone: ${(err as Error).message}`
@@ -203,9 +261,14 @@ export class RedisListener {
   }
 
   //eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async onPackageFail(message: string, err: any, jobId?: string) {
+  async onPackageFail(
+    message: string,
+    err: any,
+    jobId?: string,
+    listener: PackageListener | undefined = this.packageListener
+  ) {
     try {
-      await this.packageListener?.onPackageFail?.(message, err);
+      await listener?.onPackageFail?.(message, err);
     } catch (e) {
       logger.warn(`Error when calling onPackageFail: ${(e as Error).message}`);
     }
@@ -250,6 +313,8 @@ export class RedisListener {
       });
     }
 
-    logger.info(`Job retried: ${redactMessageString(messageStr)}`);
+    logger.info(
+      `Job retried: ${redactUrlCredentials(redactMessageString(messageStr))}`
+    );
   }
 }

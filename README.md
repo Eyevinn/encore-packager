@@ -117,6 +117,30 @@ job only and is never read from the instance configuration:
 | `hlsKeyUri`         | no       | Key URI to signal in the HLS playlists                                                     |
 | `clearLead`         | no       | Seconds of unencrypted lead-in                                                             |
 
+A message may also carry an optional `callbackUrl`, used for that job instead
+of the instance-wide `CALLBACK_URL`:
+
+```json
+{
+  "jobId": "e5e76304-744c-41d6-85f7-69007b3b1a65",
+  "url": "http://encore:8080/encoreJobs/e5e76304-744c-41d6-85f7-69007b3b1a65",
+  "callbackUrl": "https://user:password@callback.example.com/path"
+}
+```
+
+| Field         | Required | Description                                                                                                                                   |
+| ------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `jobId`       | yes      | Id of the encore job                                                                                                                          |
+| `url`         | yes      | URL to the encore job                                                                                                                         |
+| `encryption`  | no       | Per-job encryption options, see the table above                                                                                               |
+| `callbackUrl` | no       | Absolute `http`/`https` callback URL for this job. Basic auth may be embedded as `https://user:password@hostname/path`, as for `CALLBACK_URL` |
+
+A job without `callbackUrl` gets the callback configured in `CALLBACK_URL`, as
+before, and a job with neither gets no callback. A `callbackUrl` that is not an
+absolute `http`/`https` URL is rejected before the job runs. When a
+`PACKAGE_LISTENER_PLUGIN` is configured the plugin keeps handling every job,
+and a per-job `callbackUrl` is logged as ignored.
+
 Unknown members are rejected rather than ignored, on the queue and on
 `POST /retry` alike: a misspelled `clear_lead` fails the job instead of
 quietly packaging it without a clear lead.
@@ -156,7 +180,7 @@ encryption or when the instance runs with `SKIP_PACKAGING=true`.
 | `AWS_ACCESS_KEY_ID`           | Optional AWS access key id when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                                                                                                                                                           |                          |
 | `AWS_SECRET_ACCESS_KEY`       | Optional AWS secret access key when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                                                                                                                                                       |                          |
 | `S3_ENDPOINT_URL`             | Optional S3 Endpoint URL when `PACKAGE_OUTPUT_FOLDER` is an S3 bucket not on AWS                                                                                                                                                      |                          |
-| `CALLBACK_URL`                | Optional callback service url. If enabled, the packager will send callbacks on packaging success or failure. To use baisc auth, provide the URL in the format `https://user:password@hostname/path`                                   |                          |
+| `CALLBACK_URL`                | Optional callback service url. If enabled, the packager will send callbacks on packaging success or failure. To use baisc auth, provide the URL in the format `https://user:password@hostname/path`. Used if job has no `callbackUrl` |                          |
 | `SKIP_PACKAGING`              | Skip Shaka Packager and copy MP4 files with SMIL generation instead. Set to `true` to enable                                                                                                                                          | `false`                  |
 | `SMIL_BASE_URL`               | Optional base URL to include in generated SMIL files. Used for resolving relative video file paths                                                                                                                                    |                          |
 

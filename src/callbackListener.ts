@@ -2,6 +2,48 @@ import { Context } from '@osaas/client-core';
 import logger from './logger';
 import { PackageListener } from './packageListener';
 import { default as PathUtils } from 'path';
+import { CallbackConfig, parseCallbackUrl } from './config';
+
+/**
+ * Build a listener from a callback config, or undefined when no callback URL
+ * is configured. Used for the instance-wide `CALLBACK_URL`.
+ */
+export function createCallbackListener(
+  callback: CallbackConfig,
+  oscAccessToken?: string
+): CallbackListener | undefined {
+  if (!callback.url) {
+    return undefined;
+  }
+  return new CallbackListener(
+    callback.url,
+    callback.user,
+    callback.password,
+    oscAccessToken
+  );
+}
+
+/**
+ * Build a listener for a single job's own `callbackUrl`. Returns undefined
+ * when the job did not supply one, which is what makes the caller fall back to
+ * the instance-wide callback.
+ */
+export function createJobCallbackListener(
+  callbackUrl?: string,
+  oscAccessToken?: string
+): CallbackListener | undefined {
+  if (!callbackUrl) {
+    return undefined;
+  }
+  const callback = parseCallbackUrl(callbackUrl);
+  if (!callback.url) {
+    logger.warn(
+      'Ignoring unusable callbackUrl on job, using configured callback instead'
+    );
+    return undefined;
+  }
+  return createCallbackListener(callback, oscAccessToken);
+}
 
 export class CallbackListener implements PackageListener {
   constructor(
