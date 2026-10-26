@@ -6,7 +6,8 @@ import {
 import {
   DEFAULT_OUTPUT_SUBFOLDER_TEMPLATE,
   DEFAULT_STREAM_KEY_TEMPLATES,
-  PackagingConfig
+  PackagingConfig,
+  normalizeOutputFolder
 } from './config';
 
 const job: EncoreJob = {
@@ -175,6 +176,18 @@ describe('Test EncorePackager file system methods', () => {
     const destination = encorePackager.getPackageDestination(job);
     expect(destination).toEqual(
       's3://bucket-name/prefix/external-id/test-asset/e5e76304-744c-41d6-85f7-69007b3b1a65'
+    );
+  });
+  it('builds the same destination from an output folder configured without a trailing separator', () => {
+    const config = {
+      outputFolder: normalizeOutputFolder('s3://bucket-name/prefix'),
+      outputSubfolderTemplate: DEFAULT_OUTPUT_SUBFOLDER_TEMPLATE,
+      concurrency: 1
+    } as PackagingConfig;
+    const encorePackager = new EncorePackager(config);
+    const destination = encorePackager.getPackageDestination(job);
+    expect(destination).toEqual(
+      's3://bucket-name/prefix/test-asset/e5e76304-744c-41d6-85f7-69007b3b1a65'
     );
   });
 });

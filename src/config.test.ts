@@ -1,6 +1,9 @@
+import { resolve } from 'node:path';
 import {
   readCallbackConfig,
   readConfig,
+  normalizeOutputFolder,
+  DEFAULT_OUTPUT_FOLDER,
   DEFAULT_DOWNLOAD_RETRY_COUNT,
   DEFAULT_DOWNLOAD_RETRY_DELAY_SECONDS,
   DEFAULT_DOWNLOAD_MAX_TIME_SECONDS,
@@ -55,6 +58,67 @@ describe('Test parse download retry config', () => {
     const { packaging } = readConfig();
     expect(packaging.downloadRetryCount).toEqual(1);
     expect(packaging.downloadAppRetryAttempts).toEqual(9);
+  });
+});
+
+describe('Test parse package output folder config', () => {
+  afterEach(() => {
+    delete process.env.PACKAGE_OUTPUT_FOLDER;
+  });
+
+  it('adds a trailing separator to an S3 URI that is missing one', () => {
+    process.env.PACKAGE_OUTPUT_FOLDER = 's3://bucket-name/prefix';
+    const { packaging } = readConfig();
+    expect(packaging.outputFolder).toEqual('s3://bucket-name/prefix/');
+  });
+
+  it('keeps a single trailing separator on an S3 URI that already has one', () => {
+    process.env.PACKAGE_OUTPUT_FOLDER = 's3://bucket-name/prefix/';
+    const { packaging } = readConfig();
+    expect(packaging.outputFolder).toEqual('s3://bucket-name/prefix/');
+  });
+
+  it('adds a trailing separator to a bare S3 bucket URI', () => {
+    process.env.PACKAGE_OUTPUT_FOLDER = 's3://bucket-name';
+    const { packaging } = readConfig();
+    expect(packaging.outputFolder).toEqual('s3://bucket-name/');
+  });
+
+  it('resolves a relative local folder without a trailing separator', () => {
+    process.env.PACKAGE_OUTPUT_FOLDER = 'some/output';
+    const { packaging } = readConfig();
+    expect(packaging.outputFolder).toEqual(resolve('some/output'));
+  });
+
+  it('resolves an absolute local folder with a trailing separator', () => {
+    process.env.PACKAGE_OUTPUT_FOLDER = '/tmp/packaged/';
+    const { packaging } = readConfig();
+    expect(packaging.outputFolder).toEqual('/tmp/packaged');
+  });
+
+  it('falls back to the default folder when the env var is unset or empty', () => {
+    const unset = readConfig();
+    expect(unset.packaging.outputFolder).toEqual(
+      resolve(DEFAULT_OUTPUT_FOLDER)
+    );
+
+    process.env.PACKAGE_OUTPUT_FOLDER = '';
+    const empty = readConfig();
+    expect(empty.packaging.outputFolder).toEqual(
+      resolve(DEFAULT_OUTPUT_FOLDER)
+    );
+  });
+
+  it('normalizes the folder the same way when called directly', () => {
+    expect(normalizeOutputFolder('s3://bucket-name/a/b')).toEqual(
+      's3://bucket-name/a/b/'
+    );
+    expect(normalizeOutputFolder('s3://bucket-name/a/b/')).toEqual(
+      's3://bucket-name/a/b/'
+    );
+    expect(normalizeOutputFolder(undefined)).toEqual(
+      resolve(DEFAULT_OUTPUT_FOLDER)
+    );
   });
 });
 
