@@ -47,6 +47,7 @@ export interface PackagingConfig {
 }
 
 export const DEFAULT_OUTPUT_SUBFOLDER_TEMPLATE = '$INPUTNAME$/$JOBID$';
+export const DEFAULT_OUTPUT_FOLDER = 'packaged';
 
 // Renditions can be large (800MB-2GB+), so curl's --max-time needs enough
 // headroom to survive a full transfer over a slow/congested link, not just a
@@ -72,6 +73,25 @@ export const DEFAULT_STREAM_KEY_TEMPLATES: StreamKeyTemplates = {
 export interface ManifestNameTemplates {
   dashManifestNameTemplate?: string;
   hlsManifestNameTemplate?: string;
+}
+
+/**
+ * The output folder is joined with the resolved output subfolder to build the
+ * package destination (`getPackageDestination` in encorePackager.ts). For an S3
+ * URI that join is a plain string concatenation, so the folder has to end with
+ * a separator: without one, `s3://bucket/prefix` + `asset/job` becomes
+ * `s3://bucket/prefixasset/job`, and a bare `s3://bucket` + `asset/job` even
+ * moves the output to a different bucket (`s3://bucketasset/job`). Local paths
+ * are joined with `path.resolve`, which inserts the separator itself, so they
+ * are only made absolute here — as before.
+ */
+export function normalizeOutputFolder(outputFolder?: string): string {
+  const folder = outputFolder || DEFAULT_OUTPUT_FOLDER;
+  if (folder.match(/^s3:/)) {
+    const uri = new URL(folder).toString();
+    return uri.endsWith('/') ? uri : `${uri}/`;
+  }
+  return resolve(folder);
 }
 
 function readRedisConfig(): RedisConfig {
@@ -135,9 +155,7 @@ function readPackagingConfig(): PackagingConfig {
   };
 
   return {
-    outputFolder: process.env.PACKAGE_OUTPUT_FOLDER?.match(/^s3:/)
-      ? new URL(process.env.PACKAGE_OUTPUT_FOLDER).toString()
-      : resolve(process.env.PACKAGE_OUTPUT_FOLDER || 'packaged'),
+    outputFolder: normalizeOutputFolder(process.env.PACKAGE_OUTPUT_FOLDER),
     outputSubfolderTemplate:
       process.env.OUTPUT_SUBFOLDER_TEMPLATE ||
       DEFAULT_OUTPUT_SUBFOLDER_TEMPLATE,
