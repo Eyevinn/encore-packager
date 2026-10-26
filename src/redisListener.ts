@@ -5,19 +5,34 @@ import { Static, Type } from '@sinclair/typebox';
 import { TypeCompiler } from '@sinclair/typebox/compiler';
 import { PackageListener } from './packageListener';
 import logger from './logger';
+import {
+  EncryptionOptions,
+  redactKeyMaterialFor,
+  redactMessageString
+} from './encryption';
 
 export const QueueMessage = Type.Object({
   jobId: Type.String(),
-  url: Type.String()
+  url: Type.String(),
+  // Per-job encryption options, applied to this job only. Never read from
+  // instance config.
+  encryption: Type.Optional(EncryptionOptions)
 });
 
 export type QueueMessage = Static<typeof QueueMessage>;
 
 const QueueMessageChecker = TypeCompiler.Compile(QueueMessage);
 
-export function validateQueueMessage(message: unknown) {
+export function validateQueueMessage(
+  message: unknown
+): asserts message is QueueMessage {
   if (!QueueMessageChecker.Check(message)) {
-    const errors = QueueMessageChecker.Errors(message);
+    // Formatted from path and message only: the rejected values are never
+    // included, so an invalid encryption key cannot leak into logs or an API
+    // error response.
+    const errors = [...QueueMessageChecker.Errors(message)]
+      .map((error) => `${error.path || '/'} ${error.message}`)
+      .join(', ');
     throw new Error(`Invalid message: ${errors}`);
   }
 }
@@ -79,9 +94,11 @@ export class RedisListener {
   }
 
   async handleMessage(message: string) {
+    const safeMessage = redactMessageString(message);
+    let parsedMessage: unknown;
     try {
-      logger.info(`Received message: ${message}`);
-      const parsedMessage = JSON.parse(message);
+      logger.info(`Received message: ${safeMessage}`);
+      parsedMessage = JSON.parse(message);
       validateQueueMessage(parsedMessage);
       this.noProcessing++;
       try {
@@ -99,10 +116,20 @@ export class RedisListener {
         this.noProcessing--;
       }
     } catch (e) {
-      logger.error(
-        `Error when handling message ${message}: ${(e as Error)?.message}`
+      // An error thrown further down the stack can carry the raw keys, so
+      // scrub this job's key material from both the log line and whatever is
+      // handed to the package listener. The raw message is passed as well:
+      // when JSON.parse is what failed, parsedMessage is undefined and the
+      // parse error quotes a fragment of the message itself.
+      const detail = redactKeyMaterialFor(
+        `${(e as Error)?.message}`,
+        parsedMessage,
+        message
       );
-      await this.onPackageFail(message, e);
+      logger.error(`Error when handling message ${safeMessage}: ${detail}`);
+      const safeError =
+        detail === (e as Error)?.message ? e : new Error(detail);
+      await this.onPackageFail(safeMessage, safeError);
     }
   }
 
@@ -223,6 +250,6 @@ export class RedisListener {
       });
     }
 
-    logger.info(`Job retried: ${messageStr}`);
+    logger.info(`Job retried: ${redactMessageString(messageStr)}`);
   }
 }

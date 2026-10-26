@@ -13,6 +13,23 @@ import { SmilGenerator } from './smilGenerator';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
+import {
+  EncryptionOptions,
+  assertEncryptionSupported,
+  redactEncryption,
+  redactKeyMaterialInText
+} from './encryption';
+
+/**
+ * `PackageOptions` plus the per-job `encryption` member that
+ * `@eyevinn/shaka-packager-s3` is adding in Eyevinn/shaka-packager-s3#26. The
+ * installed version does not declare it yet (see
+ * `node_modules/@eyevinn/shaka-packager-s3/dist/packager.d.ts`), so it is
+ * mixed in locally and guarded by `assertEncryptionSupported`.
+ */
+type PackageOptionsWithEncryption = PackageOptions & {
+  encryption?: EncryptionOptions;
+};
 
 export interface EncoreJob {
   externalId?: string;
@@ -41,7 +58,20 @@ const ENCORE_BASIC_AUTH_USER = 'user';
 export class EncorePackager {
   constructor(private config: PackagingConfig) {}
 
-  async package(jobUrl: string): Promise<string> {
+  async package(
+    jobUrl: string,
+    encryption?: EncryptionOptions
+  ): Promise<string> {
+    if (encryption) {
+      // Fail before any work is done, so an unsupported packager can never
+      // produce unencrypted output for a job that asked for encryption.
+      assertEncryptionSupported();
+      logger.info(
+        `Packaging with encryption: ${JSON.stringify(
+          redactEncryption(encryption)
+        )}`
+      );
+    }
     const job = await this.getEncoreJob(jobUrl);
     const parsedInputs = parseInputsFromEncoreJob(
       job,
@@ -65,18 +95,33 @@ export class EncorePackager {
       : resolveInputSourceUrls(parsedInputs, source);
     const dest = this.getPackageDestination(job);
     const packageFormatOptions = this.getPackageFormatOptions(job);
-    await doPackage({
-      dest,
-      s3EndpointUrl: this.config.s3EndpointUrl,
-      inputs,
-      source,
-      serviceAccessToken,
-      noImplicitAudio: true,
-      shakaExecutable: this.config.shakaExecutable,
-      stagingDir: this.config.stagingDir,
-      packageFormatOptions
-    } as PackageOptions);
+    try {
+      await doPackage({
+        dest,
+        s3EndpointUrl: this.config.s3EndpointUrl,
+        inputs,
+        source,
+        serviceAccessToken,
+        noImplicitAudio: true,
+        shakaExecutable: this.config.shakaExecutable,
+        stagingDir: this.config.stagingDir,
+        packageFormatOptions,
+        ...(encryption ? { encryption } : {})
+      } as PackageOptionsWithEncryption);
+    } catch (err) {
+      // A failing packager run can echo its own command line, which would
+      // carry the raw keys, so scrub key material before it propagates.
+      throw new Error(
+        redactKeyMaterialInText(
+          `Packaging of job ${job.id} failed: ${(err as Error)?.message}`,
+          encryption
+        )
+      );
+    }
     if (!this.config.includeInputSources) {
+      // Only after a successful run: the copies the packager staged into the
+      // output are not part of the package. Cleanup failures are logged, not
+      // thrown, so they cannot fail an otherwise good job.
       await removeInputSourcesFromOutput(
         dest,
         inputs,
@@ -93,7 +138,16 @@ export class EncorePackager {
     return dest;
   }
 
-  async copyAndGenerateSmil(jobUrl: string): Promise<string> {
+  async copyAndGenerateSmil(
+    jobUrl: string,
+    encryption?: EncryptionOptions
+  ): Promise<string> {
+    if (encryption) {
+      throw new Error(
+        'Encryption was requested but packaging is skipped for this instance, ' +
+          'so the output would be unencrypted. Disable SKIP_PACKAGING or submit the job without encryption.'
+      );
+    }
     const job = await this.getEncoreJob(jobUrl);
     const dest = this.getPackageDestination(job);
 

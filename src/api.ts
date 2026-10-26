@@ -79,6 +79,19 @@ const healthcheck: FastifyPluginCallback<HealthcheckOptions> = (
             description: 'Invalid request body or validation error'
           }
         }
+      },
+      // Fastify's ajv runs with removeAdditional, so a misspelled encryption
+      // member (clear_lead, protection_systems, ...) would be deleted from the
+      // body before the handler sees it and the job would be requeued without
+      // it. preValidation sees the body as it was sent, so the same checker
+      // the queue path uses gets to reject exactly what the queue rejects.
+      preValidation: async (request, reply) => {
+        const body: unknown = request.body;
+        try {
+          validateQueueMessage(body);
+        } catch (error) {
+          return reply.code(400).send({ error: (error as Error).message });
+        }
       }
     },
     async (request, reply) => {
