@@ -67,11 +67,46 @@ When running as a service, the packager can be configured to use skip packaging 
 
 ```bash
 # Standard packaging mode (default)
-npm run start
+npm run start -- -r
 
 # Skip packaging mode for all jobs
-SKIP_PACKAGING=true npm run start
+SKIP_PACKAGING=true npm run start -- -r
 ```
+
+#### Queue name
+
+The name of the queue to listen to is set with the `REDIS_QUEUE` environment
+variable (see the environment variable table below for its default). The name is
+used exactly as given, with no prefix or namespace added. The server itself is
+selected separately with `REDIS_URL`, and setting `REDIS_CLUSTER=true` connects
+to it as a cluster root node instead of a single server.
+
+```bash
+REDIS_QUEUE=my-packaging-queue npm run start -- -r
+```
+
+An instance listens to exactly one queue, read from the environment at startup.
+There is no filtering or routing of messages within a queue: every message the
+packager pops is processed. Separating work therefore means running one instance
+per queue, and having whatever produces the messages choose which queue to add
+to.
+
+The queue is a redis **sorted set**, not a list. The packager pops the member
+with the lowest score using `BZPOPMIN`, so producers add jobs with `ZADD` and
+can use the score to order them:
+
+```bash
+redis-cli ZADD packaging-queue 1 '{"jobId":"e5e76304-744c-41d6-85f7-69007b3b1a65","url":"http://encore:8080/encoreJobs/e5e76304-744c-41d6-85f7-69007b3b1a65"}'
+```
+
+The pop is blocking. The listener calls `BZPOPMIN` with a timeout argument of
+`2000`, and redis reads that argument as seconds, so an idle listener stays
+blocked on the queue for up to roughly 33 minutes before the loop comes round
+and waits again.
+
+Nothing in this package adds jobs to the queue apart from the retry endpoint,
+which re-adds a job with the current timestamp as its score. Producing the
+initial job messages is up to whatever triggers packaging.
 
 #### Queue message format
 
@@ -214,7 +249,7 @@ The SMIL file includes:
 #### Starting the service
 
 ```bash
-npm run start
+npm run start -- -r
 ```
 
 ### Custom packager listener
