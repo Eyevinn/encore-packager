@@ -83,10 +83,20 @@ function readRedisConfig(): RedisConfig {
 }
 
 export function readCallbackConfig(): CallbackConfig {
+  return parseCallbackUrl(process.env.CALLBACK_URL);
+}
+
+/**
+ * Parse a callback URL, splitting any basic-auth userinfo out of it. Shared by
+ * the `CALLBACK_URL` instance configuration and the optional per-job
+ * `callbackUrl`, so a job-supplied URL is handled exactly like the configured
+ * one. An unparseable URL yields an empty config, i.e. no callback.
+ */
+export function parseCallbackUrl(rawUrl?: string): CallbackConfig {
   let url: URL | null = null;
-  if (process.env.CALLBACK_URL) {
+  if (rawUrl) {
     try {
-      url = new URL(process.env.CALLBACK_URL);
+      url = new URL(rawUrl);
     } catch {
       url = null;
     }
