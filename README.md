@@ -73,6 +73,35 @@ npm run start
 SKIP_PACKAGING=true npm run start
 ```
 
+#### Queue name
+
+The name of the queue to listen to is set with the `REDIS_QUEUE` environment
+variable, and defaults to `packaging-queue` when unset. The name is used exactly
+as given, with no prefix or namespace added. The server itself is selected
+separately with `REDIS_URL` (default `redis://localhost:6379`).
+
+```bash
+REDIS_QUEUE=my-packaging-queue npm run start -- -r
+```
+
+An instance listens to exactly one queue, read from the environment at startup.
+There is no filtering or routing of messages within a queue: every message the
+packager pops is processed. Separating work therefore means running one instance
+per queue, and having whatever produces the messages choose which queue to add
+to.
+
+The queue is a redis **sorted set**, not a list. The packager pops the member
+with the lowest score (`BZPOPMIN`, with a 2 second block timeout), so producers
+add jobs with `ZADD` and can use the score to order them:
+
+```bash
+redis-cli ZADD packaging-queue 1 '{"jobId":"e5e76304-744c-41d6-85f7-69007b3b1a65","url":"http://encore:8080/encoreJobs/e5e76304-744c-41d6-85f7-69007b3b1a65"}'
+```
+
+Nothing in this package adds jobs to the queue apart from the retry endpoint,
+which re-adds a job with the current timestamp as its score. Producing the
+initial job messages is up to whatever triggers packaging.
+
 #### Queue message format
 
 Each message on the redis queue references one encore job:
