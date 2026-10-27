@@ -167,7 +167,7 @@ function readPackagingConfig(): PackagingConfig {
     oscAccessToken: process.env.OSC_ACCESS_TOKEN,
     stagingDir: process.env.STAGING_DIR,
     packageFormatOptions,
-    trimAacPrimingSamples: process.env.TRIM_AAC_PRIMING_SAMPLES !== 'false',
+    trimAacPrimingSamples: process.env.TRIM_AAC_PRIMING_SAMPLES === 'true',
     streamKeysConfig,
     manifestNamesConfig,
     s3EndpointUrl: process.env.S3_ENDPOINT_URL,
