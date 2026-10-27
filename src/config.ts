@@ -36,6 +36,7 @@ export interface PackagingConfig {
   oscAccessToken?: string;
   stagingDir?: string;
   packageFormatOptions?: PackageFormatOptions;
+  trimAacPrimingSamples: boolean;
   streamKeysConfig: StreamKeyTemplates;
   manifestNamesConfig: ManifestNameTemplates;
   s3EndpointUrl?: string;
@@ -166,6 +167,7 @@ function readPackagingConfig(): PackagingConfig {
     oscAccessToken: process.env.OSC_ACCESS_TOKEN,
     stagingDir: process.env.STAGING_DIR,
     packageFormatOptions,
+    trimAacPrimingSamples: process.env.TRIM_AAC_PRIMING_SAMPLES !== 'false',
     streamKeysConfig,
     manifestNamesConfig,
     s3EndpointUrl: process.env.S3_ENDPOINT_URL,
