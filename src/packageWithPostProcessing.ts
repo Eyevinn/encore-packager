@@ -1,23 +1,18 @@
+import { spawnSync } from 'node:child_process';
+import { cp, mkdir, mkdtemp, rm, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { unlink } from 'node:fs/promises';
-import {
-  cleanup,
-  createPackage,
-  prepare,
-  uploadPackage
-} from '@eyevinn/shaka-packager-s3/dist/packager';
-import { toUrl } from '@eyevinn/shaka-packager-s3/dist/util';
-import { PackageOptions } from '@eyevinn/shaka-packager-s3';
+import { doPackage, PackageOptions } from '@eyevinn/shaka-packager-s3';
 import { trimAacPrimingSamples } from './audioPrimingPostProcessor';
 
 async function removeDownloadedInputs(
   inputs: PackageOptions['inputs'],
-  stagingDir: string,
+  outputDir: string,
   source?: string
 ): Promise<void> {
   for (const input of inputs) {
     const localFilename = join(
-      stagingDir,
+      outputDir,
       source || input.filename.includes('://')
         ? basename(input.filename)
         : input.filename
@@ -30,23 +25,47 @@ async function removeDownloadedInputs(
   }
 }
 
+async function uploadProcessedPackage(
+  outputDir: string,
+  destination: string,
+  s3EndpointUrl?: string
+): Promise<void> {
+  if (destination.startsWith('s3:')) {
+    const args = ['s3'];
+    if (s3EndpointUrl) args.push(`--endpoint-url=${s3EndpointUrl}`);
+    args.push('cp', '--recursive', outputDir, destination);
+    const result = spawnSync('aws', args, { stdio: 'inherit' });
+    if (result.status !== 0) {
+      throw new Error(`Upload failed with exit code ${result.status}`);
+    }
+    return;
+  }
+
+  await mkdir(destination, { recursive: true });
+  await cp(outputDir, destination, { recursive: true, force: true });
+}
+
 /**
- * Run Shaka in a staging directory, apply the AAC priming workaround to the
- * generated segments, and only then upload the package.
+ * Package into a temporary local destination, apply the AAC priming
+ * workaround, and upload the processed package through the public packager
+ * API's normal destination mechanisms.
  */
 export async function doPackageWithPostProcessing(
   options: PackageOptions
 ): Promise<void> {
-  const stagingDir = await prepare(options.stagingDir);
+  const tempParent = options.stagingDir || tmpdir();
+  await mkdir(tempParent, { recursive: true });
+  const outputDir = await mkdtemp(join(tempParent, 'encore-packager-output-'));
   try {
-    await createPackage({ ...options, stagingDir });
-    await trimAacPrimingSamples(stagingDir);
-
-    if (toUrl(options.dest).protocol === 's3:') {
-      await removeDownloadedInputs(options.inputs, stagingDir, options.source);
-    }
-    await uploadPackage(toUrl(options.dest), stagingDir, options.s3EndpointUrl);
+    await doPackage({ ...options, dest: outputDir });
+    await removeDownloadedInputs(options.inputs, outputDir, options.source);
+    await trimAacPrimingSamples(outputDir);
+    await uploadProcessedPackage(
+      outputDir,
+      options.dest,
+      options.s3EndpointUrl
+    );
   } finally {
-    await cleanup(stagingDir);
+    await rm(outputDir, { recursive: true, force: true });
   }
 }

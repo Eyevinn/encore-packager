@@ -18,7 +18,7 @@ function fullBox(version: number, flags: number, payload: Buffer): Buffer {
   return Buffer.concat([header, payload]);
 }
 
-function makeInit(): Buffer {
+function makeInit(primingDuration?: number): Buffer {
   const tkhd = Buffer.alloc(12);
   tkhd.writeUInt32BE(7, 8);
   const hdlr = Buffer.concat([
@@ -26,17 +26,37 @@ function makeInit(): Buffer {
     Buffer.from('soun'),
     Buffer.alloc(8)
   ]);
+  const stsdPayload = Buffer.alloc(4);
+  stsdPayload.writeUInt32BE(1, 0);
+  const stsd = box(
+    'stsd',
+    fullBox(0, 0, Buffer.concat([stsdPayload, box('mp4a', Buffer.alloc(28))]))
+  );
   const mdia = box(
     'mdia',
     Buffer.concat([
       box('hdlr', fullBox(0, 0, hdlr)),
-      box('mdhd', Buffer.alloc(8))
+      box('mdhd', Buffer.alloc(8)),
+      box('minf', box('stbl', stsd))
     ])
   );
-  const editList = box('edts', box('elst', Buffer.alloc(8)));
+  const editList = primingDuration
+    ? (() => {
+        const elstPayload = Buffer.alloc(16);
+        elstPayload.writeUInt32BE(1, 0);
+        elstPayload.writeUInt32BE(4096, 4);
+        elstPayload.writeInt32BE(primingDuration, 8);
+        elstPayload.writeInt32BE(1, 12);
+        return box('edts', box('elst', fullBox(0, 0, elstPayload)));
+      })()
+    : undefined;
   const trak = box(
     'trak',
-    Buffer.concat([box('tkhd', fullBox(0, 0, tkhd)), editList, mdia])
+    Buffer.concat([
+      box('tkhd', fullBox(0, 0, tkhd)),
+      ...(editList ? [editList] : []),
+      mdia
+    ])
   );
   return Buffer.concat([box('ftyp', Buffer.from('isom')), box('moov', trak)]);
 }
@@ -65,15 +85,15 @@ function makeTrun(dataOffset: number): Buffer {
 }
 
 function makeSidx(): Buffer {
-  const payload = Buffer.alloc(40);
+  const payload = Buffer.alloc(32);
   payload.writeUInt32BE(1, 0);
   payload.writeUInt32BE(48000, 4);
-  payload.writeBigUInt64BE(0n, 8);
-  payload.writeBigUInt64BE(0n, 16);
-  payload.writeUInt16BE(1, 26);
-  payload.writeUInt32BE(1000, 28);
-  payload.writeUInt32BE(4096, 32);
-  return box('sidx', fullBox(1, 0, payload));
+  payload.writeUInt32BE(0, 8);
+  payload.writeUInt32BE(0, 12);
+  payload.writeUInt16BE(1, 18);
+  payload.writeUInt32BE(1000, 20);
+  payload.writeUInt32BE(1024, 24);
+  return box('sidx', fullBox(0, 0, payload));
 }
 
 function makeSegment(tfdt: number): Buffer {
@@ -100,7 +120,7 @@ describe('AAC priming post-processing', () => {
     const stagingDir = await mkdtemp(join(tmpdir(), 'encore-packager-test-'));
     const audioDir = join(stagingDir, 'audio');
     await mkdir(audioDir);
-    await writeFile(join(audioDir, 'init.mp4'), makeInit());
+    await writeFile(join(audioDir, 'init.mp4'), makeInit(1024));
     await writeFile(join(audioDir, '1.m4s'), makeSegment(0));
     await writeFile(join(audioDir, '2.m4s'), makeSegment(5000));
 
@@ -114,12 +134,27 @@ describe('AAC priming post-processing', () => {
     expect(firstSegment.includes(Buffer.from('aaabb'))).toBe(false);
     expect(firstSegment.includes(Buffer.from('bb'))).toBe(true);
     const sidx = firstSegment.indexOf(Buffer.from('sidx'));
-    expect(firstSegment.readUInt32BE(sidx + 36)).toBe(989);
-    expect(firstSegment.readUInt32BE(sidx + 40)).toBe(3072);
+    expect(firstSegment.readUInt32BE(sidx + 28)).toBe(989);
+    expect(firstSegment.readUInt32BE(sidx + 32)).toBe(1024);
     expect(
       laterSegment.readBigUInt64BE(
         laterSegment.indexOf(Buffer.from('tfdt')) + 8
       )
     ).toBe(3976n);
+  });
+
+  it('leaves a track without matching priming metadata unchanged', async () => {
+    const stagingDir = await mkdtemp(join(tmpdir(), 'encore-packager-test-'));
+    const audioDir = join(stagingDir, 'audio');
+    await mkdir(audioDir);
+    const init = makeInit();
+    const firstSegment = makeSegment(0);
+    await writeFile(join(audioDir, 'init.mp4'), init);
+    await writeFile(join(audioDir, '1.m4s'), firstSegment);
+
+    await trimAacPrimingSamples(stagingDir);
+
+    expect(await readFile(join(audioDir, 'init.mp4'))).toEqual(init);
+    expect(await readFile(join(audioDir, '1.m4s'))).toEqual(firstSegment);
   });
 });

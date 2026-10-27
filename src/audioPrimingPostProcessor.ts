@@ -1,7 +1,7 @@
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import logger from './logger';
 
-const AAC_SAMPLES_PER_ACCESS_UNIT = 1024;
 const TRUN_DATA_OFFSET_PRESENT = 0x000001;
 const TRUN_FIRST_SAMPLE_FLAGS_PRESENT = 0x000004;
 const TRUN_SAMPLE_DURATION_PRESENT = 0x000100;
@@ -36,7 +36,14 @@ type ParsedTrun = {
 
 type ParsedTfhd = {
   trackId: number;
+  defaultSampleDuration?: number;
   defaultSampleSize?: number;
+};
+
+type AudioInitInfo = {
+  buffer: Buffer;
+  audioTrackId: number;
+  primingDuration: number;
 };
 
 function parseBoxes(buffer: Buffer, start = 0, end = buffer.length): Mp4Box[] {
@@ -138,7 +145,13 @@ function readTfhd(box: Mp4Box): ParsedTfhd {
 
   if (flags & 0x000001) offset += 8;
   if (flags & 0x000002) offset += 4;
-  if (flags & 0x000008) offset += 4;
+  if (flags & 0x000008) {
+    if (box.payload.length < offset + 4) {
+      throw new Error('Invalid tfhd default sample duration');
+    }
+    result.defaultSampleDuration = box.payload.readUInt32BE(offset);
+    offset += 4;
+  }
   if (flags & TFHD_DEFAULT_SAMPLE_SIZE_PRESENT) {
     if (box.payload.length < offset + 4) {
       throw new Error('Invalid tfhd default sample size');
@@ -293,6 +306,53 @@ function readTrackId(trak: Mp4Box): number | undefined {
   return tkhd.payload.readUInt32BE(offset);
 }
 
+function readPrimingDuration(trak: Mp4Box): number | undefined {
+  const edts = findChild(trak, 'edts');
+  const elst = edts && findChild(edts, 'elst');
+  if (!elst) return undefined;
+
+  const version = fullBoxVersion(elst.payload);
+  if (elst.payload.length < 8) throw new Error('Invalid elst box');
+  const entryCount = elst.payload.readUInt32BE(4);
+  let offset = 8;
+  const entrySize = version === 1 ? 20 : 12;
+  for (let index = 0; index < entryCount; index += 1) {
+    if (elst.payload.length < offset + entrySize) {
+      throw new Error('Invalid elst entry');
+    }
+    const mediaTime =
+      version === 1
+        ? Number(elst.payload.readBigInt64BE(offset + 8))
+        : elst.payload.readInt32BE(offset + 4);
+    if (mediaTime > 0) return mediaTime;
+    offset += entrySize;
+  }
+  return undefined;
+}
+
+function readAudioSampleEntry(trak: Mp4Box): {
+  type?: string;
+  encrypted: boolean;
+} {
+  const mdia = findChild(trak, 'mdia');
+  const minf = mdia && findChild(mdia, 'minf');
+  const stbl = minf && findChild(minf, 'stbl');
+  const stsd = stbl && findChild(stbl, 'stsd');
+  if (!stsd || stsd.payload.length < 12) {
+    return { encrypted: false };
+  }
+
+  const entries = parseBoxes(stsd.payload, 8);
+  const entry = entries[0];
+  if (!entry) return { encrypted: false };
+
+  const encrypted =
+    entry.type === 'enca' ||
+    (entry.payload.length >= 28 &&
+      parseBoxes(entry.payload, 28).some((child) => child.type === 'sinf'));
+  return { type: entry.type, encrypted };
+}
+
 function isAudioTrack(trak: Mp4Box): boolean {
   const mdia = findChild(trak, 'mdia');
   const hdlr = mdia && findChild(mdia, 'hdlr');
@@ -303,15 +363,16 @@ function isAudioTrack(trak: Mp4Box): boolean {
   );
 }
 
-function removeAudioEditList(buffer: Buffer): {
-  buffer: Buffer;
-  audioTrackId: number;
-} {
+function inspectAndRemoveAudioEditList(
+  buffer: Buffer
+): AudioInitInfo | undefined {
   const topLevel = parseBoxes(buffer);
   const moov = topLevel.find((box) => box.type === 'moov');
   if (!moov) throw new Error('MP4 init segment has no moov box');
 
   let audioTrackId: number | undefined;
+  let primingDuration: number | undefined;
+  let audioSampleEntry: { type?: string; encrypted: boolean } | undefined;
   const moovChildren = parseBoxes(moov.payload);
   const transformedMoovChildren = moovChildren.map((child) => {
     if (child.type !== 'trak' || !isAudioTrack(child))
@@ -322,6 +383,8 @@ function removeAudioEditList(buffer: Buffer): {
       throw new Error('Audio track has no track ID');
     }
     audioTrackId = trackId;
+    primingDuration = readPrimingDuration(child);
+    audioSampleEntry = readAudioSampleEntry(child);
 
     const trakChildren = parseBoxes(child.payload).filter(
       (trakChild) => trakChild.type !== 'edts'
@@ -332,24 +395,36 @@ function removeAudioEditList(buffer: Buffer): {
     );
   });
 
-  if (audioTrackId === undefined) {
-    throw new Error('MP4 init segment has no audio track');
+  if (audioTrackId === undefined || !audioSampleEntry) return undefined;
+  if (audioSampleEntry.encrypted || audioSampleEntry.type !== 'mp4a') {
+    return undefined;
   }
+  if (primingDuration === undefined) return undefined;
 
   const transformedMoov = replaceChildren(moov, transformedMoovChildren);
   const transformedTopLevel = topLevel.map((box) =>
     box === moov ? transformedMoov : serializeBox(box)
   );
-  return { buffer: Buffer.concat(transformedTopLevel), audioTrackId };
+  return {
+    buffer: Buffer.concat(transformedTopLevel),
+    audioTrackId,
+    primingDuration
+  };
 }
 
 function rewriteAudioTrun(
   moof: Mp4Box,
   audioTrackId: number,
   removeFirstSample: boolean
-): { buffer: Buffer; removedSampleSize?: number; dataOffset?: number } {
+): {
+  buffer: Buffer;
+  removedSampleSize?: number;
+  removedSampleDuration?: number;
+  dataOffset?: number;
+} {
   let removed = false;
   let removedSampleSize: number | undefined;
+  let removedSampleDuration: number | undefined;
   let originalDataOffset: number | undefined;
 
   const transformedTraf = parseBoxes(moof.payload).map((child) => {
@@ -371,11 +446,16 @@ function rewriteAudioTrun(
 
       const firstSample = trun.samples[0];
       removedSampleSize = firstSample.size ?? tfhd.defaultSampleSize;
+      removedSampleDuration =
+        firstSample.duration ?? tfhd.defaultSampleDuration;
       if (removedSampleSize === undefined) {
         throw new Error('Cannot determine the first AAC sample size');
       }
       if (removedSampleSize === 0) {
         throw new Error('The first AAC sample has zero size');
+      }
+      if (removedSampleDuration === undefined || removedSampleDuration === 0) {
+        throw new Error('Cannot determine the first AAC sample duration');
       }
       if (trun.dataOffset === undefined) {
         throw new Error('Cannot trim an audio trun without data_offset');
@@ -399,6 +479,7 @@ function rewriteAudioTrun(
   return {
     buffer: replaceChildren(moof, transformedTraf),
     removedSampleSize,
+    removedSampleDuration,
     dataOffset: originalDataOffset
   };
 }
@@ -420,15 +501,10 @@ function adjustTrunDataOffsets(moofBuffer: Buffer, delta: number): Buffer {
   return replaceChildren(moof, transformedTraf);
 }
 
-function adjustFirstSidx(
-  box: Mp4Box,
-  referencedSizeDelta: number,
-  durationDelta: number
-): Buffer {
+function adjustFirstSidx(box: Mp4Box, referencedSizeDelta: number): Buffer {
   const version = fullBoxVersion(box.payload);
   let offset = 12;
-  offset += version === 1 ? 8 : 4;
-  offset += 8;
+  offset += version === 1 ? 16 : 8;
   offset += 2;
   if (box.payload.length < offset + 2) {
     throw new Error('Invalid sidx box');
@@ -447,23 +523,20 @@ function adjustFirstSidx(
 
   const referencedSize = reference & 0x7fffffff;
   const nextReferencedSize = referencedSize + referencedSizeDelta;
-  const nextDuration = box.payload.readUInt32BE(offset + 4) + durationDelta;
-  if (
-    nextReferencedSize < 0 ||
-    nextReferencedSize > 0x7fffffff ||
-    nextDuration < 0 ||
-    nextDuration > 0xffffffff
-  ) {
+  if (nextReferencedSize < 0 || nextReferencedSize > 0x7fffffff) {
     throw new Error('Invalid adjusted sidx values');
   }
 
   const payload = Buffer.from(box.payload);
   payload.writeUInt32BE(nextReferencedSize, offset);
-  payload.writeUInt32BE(nextDuration, offset + 4);
   return encodeBox('sidx', payload);
 }
 
-function shiftAudioTfdt(buffer: Buffer, audioTrackId: number): Buffer {
+function shiftAudioTfdt(
+  buffer: Buffer,
+  audioTrackId: number,
+  shift: number
+): Buffer {
   const topLevel = parseBoxes(buffer);
   const moof = topLevel.find((box) => box.type === 'moof');
   if (!moof) throw new Error('Audio media segment has no moof box');
@@ -485,10 +558,10 @@ function shiftAudioTfdt(buffer: Buffer, audioTrackId: number): Buffer {
         version === 1
           ? Number(trafChild.payload.readBigUInt64BE(offset))
           : trafChild.payload.readUInt32BE(offset);
-      if (current < AAC_SAMPLES_PER_ACCESS_UNIT) {
+      if (current < shift) {
         throw new Error('Cannot move audio tfdt before zero');
       }
-      const next = current - AAC_SAMPLES_PER_ACCESS_UNIT;
+      const next = current - shift;
       const payload = Buffer.from(trafChild.payload);
       if (version === 1) {
         payload.writeBigUInt64BE(BigInt(next), offset);
@@ -508,19 +581,33 @@ function shiftAudioTfdt(buffer: Buffer, audioTrackId: number): Buffer {
   );
 }
 
-function trimFirstAudioSample(buffer: Buffer, audioTrackId: number): Buffer {
+function trimFirstAudioSample(
+  buffer: Buffer,
+  audioTrackId: number
+): { buffer: Buffer; removedSampleDuration: number } {
   const topLevel = parseBoxes(buffer);
   const moof = topLevel.find((box) => box.type === 'moof');
   if (!moof) throw new Error('Audio media segment has no moof box');
 
+  const audioTraf = parseBoxes(moof.payload).find((child) => {
+    if (child.type !== 'traf') return false;
+    const tfhd = findChild(child, 'tfhd');
+    return Boolean(tfhd && readTfhd(tfhd).trackId === audioTrackId);
+  });
+  if (audioTraf && findChild(audioTraf, 'senc')) {
+    throw new Error('Encrypted audio segments are not supported');
+  }
+
   const rewritten = rewriteAudioTrun(moof, audioTrackId, true);
   if (
     rewritten.removedSampleSize === undefined ||
+    rewritten.removedSampleDuration === undefined ||
     rewritten.dataOffset === undefined
   ) {
     throw new Error('Failed to identify the first AAC sample');
   }
   const removedSampleSize = rewritten.removedSampleSize;
+  const removedSampleDuration = rewritten.removedSampleDuration;
   const dataOffset = rewritten.dataOffset;
 
   const oldMoofSize = moof.size;
@@ -535,11 +622,7 @@ function trimFirstAudioSample(buffer: Buffer, audioTrackId: number): Buffer {
     if (box === moof) return transformedMoof;
     if (box.type === 'sidx' && !adjustedSidx) {
       adjustedSidx = true;
-      return adjustFirstSidx(
-        box,
-        delta - removedSampleSize,
-        -AAC_SAMPLES_PER_ACCESS_UNIT
-      );
+      return adjustFirstSidx(box, delta - removedSampleSize);
     }
     if (box.type !== 'mdat') return serializeBox(box);
 
@@ -563,7 +646,10 @@ function trimFirstAudioSample(buffer: Buffer, audioTrackId: number): Buffer {
   if (!removedFromMdat) {
     throw new Error('The first AAC sample is not present in an mdat box');
   }
-  return Buffer.concat(transformedTopLevel);
+  return {
+    buffer: Buffer.concat(transformedTopLevel),
+    removedSampleDuration
+  };
 }
 
 function segmentNumber(filename: string): number {
@@ -571,23 +657,19 @@ function segmentNumber(filename: string): number {
   return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
 }
 
-export async function trimAacPrimingSamples(stagingDir: string): Promise<void> {
-  const audioDir = join(stagingDir, 'audio');
-  try {
-    await stat(audioDir);
-  } catch {
-    return;
-  }
-
+async function processAudioRendition(audioDir: string): Promise<boolean> {
   const initPath = join(audioDir, 'init.mp4');
   try {
     await stat(initPath);
   } catch {
-    return;
+    return false;
   }
 
-  const init = await removeAudioEditList(await readFile(initPath));
-  await writeFile(initPath, init.buffer);
+  const init = await inspectAndRemoveAudioEditList(await readFile(initPath));
+  if (!init) {
+    logger.debug(`Skipping AAC priming post-processing for ${audioDir}`);
+    return false;
+  }
 
   const segmentFiles = (await readdir(audioDir)).filter((file) =>
     file.endsWith('.m4s')
@@ -595,19 +677,61 @@ export async function trimAacPrimingSamples(stagingDir: string): Promise<void> {
   segmentFiles.sort(
     (left, right) => segmentNumber(left) - segmentNumber(right)
   );
-  if (segmentFiles.length === 0) return;
+  if (segmentFiles.length === 0) {
+    logger.debug(
+      `Skipping AAC priming post-processing for ${audioDir}: no segments`
+    );
+    return false;
+  }
 
   const firstSegment = join(audioDir, segmentFiles[0]);
-  await writeFile(
-    firstSegment,
-    trimFirstAudioSample(await readFile(firstSegment), init.audioTrackId)
+  const trimmedFirstSegment = trimFirstAudioSample(
+    await readFile(firstSegment),
+    init.audioTrackId
   );
+  if (trimmedFirstSegment.removedSampleDuration !== init.primingDuration) {
+    logger.debug(
+      `Skipping AAC priming post-processing for ${audioDir}: edit-list duration ${init.primingDuration} does not match first sample duration ${trimmedFirstSegment.removedSampleDuration}`
+    );
+    return false;
+  }
 
+  const laterSegments = [] as { path: string; buffer: Buffer }[];
   for (const segment of segmentFiles.slice(1)) {
     const path = join(audioDir, segment);
-    await writeFile(
+    laterSegments.push({
       path,
-      shiftAudioTfdt(await readFile(path), init.audioTrackId)
+      buffer: shiftAudioTfdt(
+        await readFile(path),
+        init.audioTrackId,
+        trimmedFirstSegment.removedSampleDuration
+      )
+    });
+  }
+
+  await writeFile(initPath, init.buffer);
+  await writeFile(firstSegment, trimmedFirstSegment.buffer);
+  for (const segment of laterSegments) {
+    await writeFile(segment.path, segment.buffer);
+  }
+  logger.info(`Applied AAC priming post-processing to ${audioDir}`);
+  return true;
+}
+
+export async function trimAacPrimingSamples(stagingDir: string): Promise<void> {
+  const entries = await readdir(stagingDir, { withFileTypes: true });
+  const audioRenditions = entries.filter((entry) => entry.isDirectory());
+  let processed = 0;
+
+  for (const rendition of audioRenditions) {
+    if (await processAudioRendition(join(stagingDir, rendition.name))) {
+      processed += 1;
+    }
+  }
+
+  if (processed === 0) {
+    logger.debug(
+      'No eligible audio renditions found for AAC priming post-processing'
     );
   }
 }
