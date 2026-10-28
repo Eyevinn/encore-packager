@@ -520,7 +520,7 @@ function adjustTrunDataOffsets(moofBuffer: Buffer, delta: number): Buffer {
   return replaceChildren(moof, transformedTraf);
 }
 
-function adjustFirstSidx(box: Mp4Box, referencedSizeDelta: number): Buffer {
+function sidxReferenceOffset(box: Mp4Box): number {
   const version = fullBoxVersion(box.payload);
   let offset = 12;
   offset += version === 1 ? 16 : 8;
@@ -528,9 +528,17 @@ function adjustFirstSidx(box: Mp4Box, referencedSizeDelta: number): Buffer {
   if (box.payload.length < offset + 2) {
     throw new Error('Invalid sidx box');
   }
+  return offset + 2;
+}
 
-  const referenceCount = box.payload.readUInt16BE(offset);
-  offset += 2;
+function adjustFirstSidx(
+  box: Mp4Box,
+  referencedSizeDelta: number,
+  durationDelta: number
+): Buffer {
+  const offset = sidxReferenceOffset(box);
+
+  const referenceCount = box.payload.readUInt16BE(offset - 2);
   if (referenceCount === 0 || box.payload.length < offset + 12) {
     return box.raw;
   }
@@ -545,9 +553,36 @@ function adjustFirstSidx(box: Mp4Box, referencedSizeDelta: number): Buffer {
   if (nextReferencedSize < 0 || nextReferencedSize > 0x7fffffff) {
     throw new Error('Invalid adjusted sidx values');
   }
+  const duration = box.payload.readUInt32BE(offset + 4);
+  const nextDuration = duration - durationDelta;
+  if (nextDuration < 0 || nextDuration > 0xffffffff) {
+    throw new Error('Invalid adjusted sidx duration');
+  }
 
   const payload = Buffer.from(box.payload);
   payload.writeUInt32BE(nextReferencedSize, offset);
+  payload.writeUInt32BE(nextDuration, offset + 4);
+  return encodeBox('sidx', payload);
+}
+
+function shiftSidxEarliestPresentationTime(box: Mp4Box, shift: number): Buffer {
+  const version = fullBoxVersion(box.payload);
+  const earliestOffset = 12;
+  const current =
+    version === 1
+      ? Number(box.payload.readBigUInt64BE(earliestOffset))
+      : box.payload.readUInt32BE(earliestOffset);
+  if (!Number.isSafeInteger(current) || current < shift) {
+    throw new Error('Cannot move sidx earliest presentation time before zero');
+  }
+
+  const next = current - shift;
+  const payload = Buffer.from(box.payload);
+  if (version === 1) {
+    payload.writeBigUInt64BE(BigInt(next), earliestOffset);
+  } else {
+    payload.writeUInt32BE(next, earliestOffset);
+  }
   return encodeBox('sidx', payload);
 }
 
@@ -595,8 +630,16 @@ function shiftAudioTfdt(
 
   if (!shifted) throw new Error('Audio media segment has no tfdt box');
   const transformedMoof = replaceChildren(moof, transformedTraf);
+  let shiftedSidx = false;
   return Buffer.concat(
-    topLevel.map((box) => (box === moof ? transformedMoof : serializeBox(box)))
+    topLevel.map((box) => {
+      if (box === moof) return transformedMoof;
+      if (box.type === 'sidx' && !shiftedSidx) {
+        shiftedSidx = true;
+        return shiftSidxEarliestPresentationTime(box, shift);
+      }
+      return serializeBox(box);
+    })
   );
 }
 
@@ -608,6 +651,14 @@ function trimFirstAudioSample(
   const topLevel = parseBoxes(buffer);
   const moof = topLevel.find((box) => box.type === 'moof');
   if (!moof) throw new Error('Audio media segment has no moof box');
+  const trafs = parseBoxes(moof.payload).filter(
+    (child) => child.type === 'traf'
+  );
+  if (trafs.length > 1) {
+    throw new Error(
+      'Audio priming post-processing only supports single-track moof boxes'
+    );
+  }
 
   const audioTraf = parseBoxes(moof.payload).find((child) => {
     if (child.type !== 'traf') return false;
@@ -647,7 +698,11 @@ function trimFirstAudioSample(
     if (box === moof) return transformedMoof;
     if (box.type === 'sidx' && !adjustedSidx) {
       adjustedSidx = true;
-      return adjustFirstSidx(box, delta - removedSampleSize);
+      return adjustFirstSidx(
+        box,
+        delta - removedSampleSize,
+        removedSampleDuration
+      );
     }
     if (box.type !== 'mdat') return serializeBox(box);
 
@@ -690,58 +745,69 @@ async function processAudioRendition(audioDir: string): Promise<boolean> {
     return false;
   }
 
-  const init = await inspectAndRemoveAudioEditList(await readFile(initPath));
-  if (!init) {
-    logger.debug(`Skipping AAC priming post-processing for ${audioDir}`);
-    return false;
-  }
+  try {
+    const init = await inspectAndRemoveAudioEditList(await readFile(initPath));
+    if (!init) {
+      logger.warn(
+        `Skipping AAC priming post-processing for ${audioDir}: not an eligible clear AAC rendition`
+      );
+      return false;
+    }
 
-  const segmentFiles = (await readdir(audioDir)).filter((file) =>
-    file.endsWith('.m4s')
-  );
-  segmentFiles.sort(
-    (left, right) => segmentNumber(left) - segmentNumber(right)
-  );
-  if (segmentFiles.length === 0) {
-    logger.debug(
-      `Skipping AAC priming post-processing for ${audioDir}: no segments`
+    const segmentFiles = (await readdir(audioDir)).filter((file) =>
+      file.endsWith('.m4s')
+    );
+    segmentFiles.sort(
+      (left, right) => segmentNumber(left) - segmentNumber(right)
+    );
+    if (segmentFiles.length === 0) {
+      logger.warn(
+        `Skipping AAC priming post-processing for ${audioDir}: no segmented audio files`
+      );
+      return false;
+    }
+
+    const firstSegment = join(audioDir, segmentFiles[0]);
+    const trimmedFirstSegment = trimFirstAudioSample(
+      await readFile(firstSegment),
+      init.audioTrackId,
+      init.defaultSampleDuration
+    );
+    if (trimmedFirstSegment.removedSampleDuration !== init.primingDuration) {
+      logger.warn(
+        `Skipping AAC priming post-processing for ${audioDir}: edit-list duration ${init.primingDuration} does not match first sample duration ${trimmedFirstSegment.removedSampleDuration}`
+      );
+      return false;
+    }
+
+    const laterSegments = [] as { path: string; buffer: Buffer }[];
+    for (const segment of segmentFiles.slice(1)) {
+      const path = join(audioDir, segment);
+      laterSegments.push({
+        path,
+        buffer: shiftAudioTfdt(
+          await readFile(path),
+          init.audioTrackId,
+          trimmedFirstSegment.removedSampleDuration
+        )
+      });
+    }
+
+    await writeFile(initPath, init.buffer);
+    await writeFile(firstSegment, trimmedFirstSegment.buffer);
+    for (const segment of laterSegments) {
+      await writeFile(segment.path, segment.buffer);
+    }
+    logger.info(`Applied AAC priming post-processing to ${audioDir}`);
+    return true;
+  } catch (error) {
+    logger.warn(
+      `Skipping AAC priming post-processing for ${audioDir}: ${
+        (error as Error).message
+      }`
     );
     return false;
   }
-
-  const firstSegment = join(audioDir, segmentFiles[0]);
-  const trimmedFirstSegment = trimFirstAudioSample(
-    await readFile(firstSegment),
-    init.audioTrackId,
-    init.defaultSampleDuration
-  );
-  if (trimmedFirstSegment.removedSampleDuration !== init.primingDuration) {
-    logger.debug(
-      `Skipping AAC priming post-processing for ${audioDir}: edit-list duration ${init.primingDuration} does not match first sample duration ${trimmedFirstSegment.removedSampleDuration}`
-    );
-    return false;
-  }
-
-  const laterSegments = [] as { path: string; buffer: Buffer }[];
-  for (const segment of segmentFiles.slice(1)) {
-    const path = join(audioDir, segment);
-    laterSegments.push({
-      path,
-      buffer: shiftAudioTfdt(
-        await readFile(path),
-        init.audioTrackId,
-        trimmedFirstSegment.removedSampleDuration
-      )
-    });
-  }
-
-  await writeFile(initPath, init.buffer);
-  await writeFile(firstSegment, trimmedFirstSegment.buffer);
-  for (const segment of laterSegments) {
-    await writeFile(segment.path, segment.buffer);
-  }
-  logger.info(`Applied AAC priming post-processing to ${audioDir}`);
-  return true;
 }
 
 export async function trimAacPrimingSamples(stagingDir: string): Promise<void> {
@@ -756,8 +822,8 @@ export async function trimAacPrimingSamples(stagingDir: string): Promise<void> {
   }
 
   if (processed === 0) {
-    logger.debug(
-      'No eligible audio renditions found for AAC priming post-processing'
+    logger.warn(
+      'AAC priming post-processing was enabled, but no eligible segmented AAC renditions were found; encrypted or segmentSingleFile output is left unchanged'
     );
   }
 }

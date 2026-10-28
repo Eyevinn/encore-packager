@@ -61,6 +61,20 @@ In skip packaging mode, the tool will:
 - Support both local file copying and HTTP(S) URL downloading
 - Create the same output folder structure as standard packaging mode
 
+#### AAC priming workaround
+
+Set `TRIM_AAC_PRIMING_SAMPLES=true` to enable the opt-in post-packaging AAC
+priming workaround. It is disabled by default and is configured through the
+service environment; there is no CLI flag. When enabled, the packaged output
+is staged locally, rewritten, and uploaded a second time, so it requires extra
+temporary disk space and time. For S3 destinations, the `aws` CLI must be
+available to perform the upload.
+
+The workaround applies only to segmented, clear AAC renditions. Encrypted audio
+and `segmentSingleFile` output are left unchanged. Unsupported or unexpected
+rendition layouts are skipped with a warning and the rest of the package is
+still uploaded.
+
 ### Running as a service
 
 When running as a service, the packager can be configured to use skip packaging mode for all jobs by setting the `SKIP_PACKAGING` environment variable.

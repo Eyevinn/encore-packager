@@ -1,48 +1,51 @@
-import { spawnSync } from 'node:child_process';
-import { cp, mkdir, mkdtemp, rm, unlink } from 'node:fs/promises';
+import { mkdir, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
-import { doPackage, PackageOptions } from '@eyevinn/shaka-packager-s3';
+import { basename, join, resolve, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import {
+  cleanup,
+  createPackage,
+  PackageOptions,
+  prepare,
+  uploadPackage
+} from '@eyevinn/shaka-packager-s3/dist/packager';
 import { trimAacPrimingSamples } from './audioPrimingPostProcessor';
 
 async function removeDownloadedInputs(
   inputs: PackageOptions['inputs'],
-  outputDir: string,
-  source?: string
+  outputDir: string
 ): Promise<void> {
+  const outputRoot = resolve(outputDir) + sep;
   for (const input of inputs) {
-    const localFilename = join(
-      outputDir,
-      source || input.filename.includes('://')
-        ? basename(input.filename)
-        : input.filename
-    );
+    // This mirrors the library's download path: only an input URL is reduced
+    // to its basename. A relative input with a configured source keeps its
+    // relative path below the staging directory.
+    const relativeFilename = input.filename.includes('://')
+      ? basename(input.filename)
+      : input.filename;
+    const localFilename = resolve(outputDir, relativeFilename);
+    if (!localFilename.startsWith(outputRoot)) {
+      console.warn(
+        `Skipping removal of input outside the staging directory: ${input.filename}`
+      );
+      continue;
+    }
     try {
       await unlink(localFilename);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        console.warn(`Downloaded input was not found: ${localFilename}`);
+        continue;
+      }
+      throw error;
     }
   }
 }
 
-async function uploadProcessedPackage(
-  outputDir: string,
-  destination: string,
-  s3EndpointUrl?: string
-): Promise<void> {
-  if (destination.startsWith('s3:')) {
-    const args = ['s3'];
-    if (s3EndpointUrl) args.push(`--endpoint-url=${s3EndpointUrl}`);
-    args.push('cp', '--recursive', outputDir, destination);
-    const result = spawnSync('aws', args, { stdio: 'inherit' });
-    if (result.status !== 0) {
-      throw new Error(`Upload failed with exit code ${result.status}`);
-    }
-    return;
-  }
-
-  await mkdir(destination, { recursive: true });
-  await cp(outputDir, destination, { recursive: true, force: true });
+function toDestinationUrl(destination: string): URL {
+  return /^[a-z0-9]+:.*/.test(destination)
+    ? new URL(destination)
+    : pathToFileURL(resolve(destination));
 }
 
 /**
@@ -55,17 +58,17 @@ export async function doPackageWithPostProcessing(
 ): Promise<void> {
   const tempParent = options.stagingDir || tmpdir();
   await mkdir(tempParent, { recursive: true });
-  const outputDir = await mkdtemp(join(tempParent, 'encore-packager-output-'));
+  const outputDir = await prepare(join(tempParent, 'encore-packager-output'));
   try {
-    await doPackage({ ...options, dest: outputDir });
-    await removeDownloadedInputs(options.inputs, outputDir, options.source);
+    await createPackage({ ...options, dest: outputDir, stagingDir: outputDir });
+    await removeDownloadedInputs(options.inputs, outputDir);
     await trimAacPrimingSamples(outputDir);
-    await uploadProcessedPackage(
+    await uploadPackage(
+      toDestinationUrl(options.dest),
       outputDir,
-      options.dest,
       options.s3EndpointUrl
     );
   } finally {
-    await rm(outputDir, { recursive: true, force: true });
+    await cleanup(outputDir);
   }
 }

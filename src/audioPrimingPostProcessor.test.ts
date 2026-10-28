@@ -115,23 +115,46 @@ function makeTrun(dataOffset: number, includeDuration = true): Buffer {
   return box('trun', fullBox(0, flags, payload));
 }
 
-function makeSidx(): Buffer {
-  const payload = Buffer.alloc(32);
+function makeSidx(
+  version = 0,
+  earliestPresentationTime = 0,
+  subsegmentDuration = 2048
+): Buffer {
+  const payload = Buffer.alloc(version === 1 ? 40 : 32);
   payload.writeUInt32BE(1, 0);
   payload.writeUInt32BE(48000, 4);
-  payload.writeUInt32BE(0, 8);
-  payload.writeUInt32BE(0, 12);
-  payload.writeUInt16BE(1, 18);
-  payload.writeUInt32BE(1000, 20);
-  payload.writeUInt32BE(1024, 24);
-  return box('sidx', fullBox(0, 0, payload));
+  if (version === 1) {
+    payload.writeBigUInt64BE(BigInt(earliestPresentationTime), 8);
+    payload.writeBigUInt64BE(0n, 16);
+    payload.writeUInt16BE(1, 26);
+    payload.writeUInt32BE(1000, 28);
+    payload.writeUInt32BE(subsegmentDuration, 32);
+  } else {
+    payload.writeUInt32BE(earliestPresentationTime, 8);
+    payload.writeUInt32BE(0, 12);
+    payload.writeUInt16BE(1, 18);
+    payload.writeUInt32BE(1000, 20);
+    payload.writeUInt32BE(subsegmentDuration, 24);
+  }
+  return box('sidx', fullBox(version, 0, payload));
 }
 
-function makeSegment(tfdt: number, includeDuration = true): Buffer {
+function makeSegment(
+  tfdt: number,
+  includeDuration = true,
+  sidxVersion = 0,
+  sidxEarliestPresentationTime = tfdt,
+  extraTrafChild?: Buffer
+): Buffer {
   const mfhd = box('mfhd', fullBox(0, 0, Buffer.alloc(4)));
   const trafWithPlaceholder = box(
     'traf',
-    Buffer.concat([makeTfhd(), makeTfdt(tfdt), makeTrun(0, includeDuration)])
+    Buffer.concat([
+      makeTfhd(),
+      makeTfdt(tfdt),
+      makeTrun(0, includeDuration),
+      ...(extraTrafChild ? [extraTrafChild] : [])
+    ])
   );
   const dataOffset =
     box('moof', Buffer.concat([mfhd, trafWithPlaceholder])).length + 8;
@@ -140,11 +163,12 @@ function makeSegment(tfdt: number, includeDuration = true): Buffer {
     Buffer.concat([
       makeTfhd(),
       makeTfdt(tfdt),
-      makeTrun(dataOffset, includeDuration)
+      makeTrun(dataOffset, includeDuration),
+      ...(extraTrafChild ? [extraTrafChild] : [])
     ])
   );
   return Buffer.concat([
-    makeSidx(),
+    makeSidx(sidxVersion, sidxEarliestPresentationTime),
     box('moof', Buffer.concat([mfhd, correctedTraf])),
     box('mdat', Buffer.from('aaabb'))
   ]);
@@ -176,6 +200,9 @@ describe('AAC priming post-processing', () => {
         laterSegment.indexOf(Buffer.from('tfdt')) + 8
       )
     ).toBe(3976n);
+    expect(
+      laterSegment.readUInt32BE(laterSegment.indexOf(Buffer.from('sidx')) + 16)
+    ).toBe(3976);
   });
 
   it('leaves a track without matching priming metadata unchanged', async () => {
@@ -209,5 +236,39 @@ describe('AAC priming post-processing', () => {
         laterSegment.indexOf(Buffer.from('tfdt')) + 8
       )
     ).toBe(3976n);
+  });
+
+  it('shifts version 1 sidx timing with the audio tfdt', async () => {
+    const stagingDir = await mkdtemp(join(tmpdir(), 'encore-packager-test-'));
+    const audioDir = join(stagingDir, 'audio');
+    await mkdir(audioDir);
+    await writeFile(join(audioDir, 'init.mp4'), makeInit(1024));
+    await writeFile(join(audioDir, '1.m4s'), makeSegment(0));
+    await writeFile(join(audioDir, '2.m4s'), makeSegment(5000, true, 1, 5000));
+
+    await trimAacPrimingSamples(stagingDir);
+
+    const laterSegment = await readFile(join(audioDir, '2.m4s'));
+    const sidx = laterSegment.indexOf(Buffer.from('sidx'));
+    expect(laterSegment.readBigUInt64BE(sidx + 16)).toBe(3976n);
+  });
+
+  it('leaves a rendition unchanged when its first segment is unsupported', async () => {
+    const stagingDir = await mkdtemp(join(tmpdir(), 'encore-packager-test-'));
+    const audioDir = join(stagingDir, 'audio');
+    await mkdir(audioDir);
+    await writeFile(join(audioDir, 'init.mp4'), makeInit(1024));
+    const firstSegment = makeSegment(
+      0,
+      true,
+      0,
+      0,
+      box('senc', fullBox(0, 0, Buffer.alloc(4)))
+    );
+    await writeFile(join(audioDir, '1.m4s'), firstSegment);
+
+    await expect(trimAacPrimingSamples(stagingDir)).resolves.toBeUndefined();
+    expect(await readFile(join(audioDir, 'init.mp4'))).toEqual(makeInit(1024));
+    expect(await readFile(join(audioDir, '1.m4s'))).toEqual(firstSegment);
   });
 });
