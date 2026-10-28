@@ -18,7 +18,10 @@ function fullBox(version: number, flags: number, payload: Buffer): Buffer {
   return Buffer.concat([header, payload]);
 }
 
-function makeInit(primingDuration?: number): Buffer {
+function makeInit(
+  primingDuration?: number,
+  trexDefaultSampleDuration?: number
+): Buffer {
   const tkhd = Buffer.alloc(12);
   tkhd.writeUInt32BE(7, 8);
   const hdlr = Buffer.concat([
@@ -58,7 +61,29 @@ function makeInit(primingDuration?: number): Buffer {
       mdia
     ])
   );
-  return Buffer.concat([box('ftyp', Buffer.from('isom')), box('moov', trak)]);
+  const mvex = trexDefaultSampleDuration
+    ? box(
+        'mvex',
+        box(
+          'trex',
+          fullBox(
+            0,
+            0,
+            (() => {
+              const payload = Buffer.alloc(20);
+              payload.writeUInt32BE(7, 0);
+              payload.writeUInt32BE(1, 4);
+              payload.writeUInt32BE(trexDefaultSampleDuration, 8);
+              return payload;
+            })()
+          )
+        )
+      )
+    : undefined;
+  return Buffer.concat([
+    box('ftyp', Buffer.from('isom')),
+    box('moov', Buffer.concat([trak, ...(mvex ? [mvex] : [])]))
+  ]);
 }
 
 function makeTfhd(): Buffer {
@@ -73,15 +98,21 @@ function makeTfdt(value: number): Buffer {
   return box('tfdt', fullBox(1, 0, payload.subarray(0, 12)));
 }
 
-function makeTrun(dataOffset: number): Buffer {
-  const payload = Buffer.alloc(8 + 16);
+function makeTrun(dataOffset: number, includeDuration = true): Buffer {
+  const flags = includeDuration ? 0x000301 : 0x000201;
+  const payload = Buffer.alloc(includeDuration ? 8 + 16 : 8 + 8);
   payload.writeUInt32BE(2, 0);
   payload.writeInt32BE(dataOffset, 4);
-  payload.writeUInt32BE(1024, 8);
-  payload.writeUInt32BE(3, 12);
-  payload.writeUInt32BE(1024, 16);
-  payload.writeUInt32BE(2, 20);
-  return box('trun', fullBox(0, 0x000301, payload));
+  if (includeDuration) {
+    payload.writeUInt32BE(1024, 8);
+    payload.writeUInt32BE(3, 12);
+    payload.writeUInt32BE(1024, 16);
+    payload.writeUInt32BE(2, 20);
+  } else {
+    payload.writeUInt32BE(3, 8);
+    payload.writeUInt32BE(2, 12);
+  }
+  return box('trun', fullBox(0, flags, payload));
 }
 
 function makeSidx(): Buffer {
@@ -96,17 +127,21 @@ function makeSidx(): Buffer {
   return box('sidx', fullBox(0, 0, payload));
 }
 
-function makeSegment(tfdt: number): Buffer {
+function makeSegment(tfdt: number, includeDuration = true): Buffer {
   const mfhd = box('mfhd', fullBox(0, 0, Buffer.alloc(4)));
   const trafWithPlaceholder = box(
     'traf',
-    Buffer.concat([makeTfhd(), makeTfdt(tfdt), makeTrun(0)])
+    Buffer.concat([makeTfhd(), makeTfdt(tfdt), makeTrun(0, includeDuration)])
   );
   const dataOffset =
     box('moof', Buffer.concat([mfhd, trafWithPlaceholder])).length + 8;
   const correctedTraf = box(
     'traf',
-    Buffer.concat([makeTfhd(), makeTfdt(tfdt), makeTrun(dataOffset)])
+    Buffer.concat([
+      makeTfhd(),
+      makeTfdt(tfdt),
+      makeTrun(dataOffset, includeDuration)
+    ])
   );
   return Buffer.concat([
     makeSidx(),
@@ -156,5 +191,23 @@ describe('AAC priming post-processing', () => {
 
     expect(await readFile(join(audioDir, 'init.mp4'))).toEqual(init);
     expect(await readFile(join(audioDir, '1.m4s'))).toEqual(firstSegment);
+  });
+
+  it('uses trex default sample duration when trun omits it', async () => {
+    const stagingDir = await mkdtemp(join(tmpdir(), 'encore-packager-test-'));
+    const audioDir = join(stagingDir, 'audio');
+    await mkdir(audioDir);
+    await writeFile(join(audioDir, 'init.mp4'), makeInit(1024, 1024));
+    await writeFile(join(audioDir, '1.m4s'), makeSegment(0, false));
+    await writeFile(join(audioDir, '2.m4s'), makeSegment(5000, false));
+
+    await trimAacPrimingSamples(stagingDir);
+
+    const laterSegment = await readFile(join(audioDir, '2.m4s'));
+    expect(
+      laterSegment.readBigUInt64BE(
+        laterSegment.indexOf(Buffer.from('tfdt')) + 8
+      )
+    ).toBe(3976n);
   });
 });

@@ -44,6 +44,7 @@ type AudioInitInfo = {
   buffer: Buffer;
   audioTrackId: number;
   primingDuration: number;
+  defaultSampleDuration?: number;
 };
 
 function parseBoxes(buffer: Buffer, start = 0, end = buffer.length): Mp4Box[] {
@@ -353,6 +354,20 @@ function readAudioSampleEntry(trak: Mp4Box): {
   return { type: entry.type, encrypted };
 }
 
+function readTrexDefaultSampleDuration(
+  moov: Mp4Box,
+  trackId: number
+): number | undefined {
+  const mvex = findChild(moov, 'mvex');
+  if (!mvex) return undefined;
+  const trex = parseBoxes(mvex.payload).find((child) => {
+    if (child.type !== 'trex' || child.payload.length < 16) return false;
+    return child.payload.readUInt32BE(4) === trackId;
+  });
+  if (!trex || trex.payload.length < 16) return undefined;
+  return trex.payload.readUInt32BE(12);
+}
+
 function isAudioTrack(trak: Mp4Box): boolean {
   const mdia = findChild(trak, 'mdia');
   const hdlr = mdia && findChild(mdia, 'hdlr');
@@ -408,14 +423,16 @@ function inspectAndRemoveAudioEditList(
   return {
     buffer: Buffer.concat(transformedTopLevel),
     audioTrackId,
-    primingDuration
+    primingDuration,
+    defaultSampleDuration: readTrexDefaultSampleDuration(moov, audioTrackId)
   };
 }
 
 function rewriteAudioTrun(
   moof: Mp4Box,
   audioTrackId: number,
-  removeFirstSample: boolean
+  removeFirstSample: boolean,
+  defaultSampleDuration?: number
 ): {
   buffer: Buffer;
   removedSampleSize?: number;
@@ -447,7 +464,9 @@ function rewriteAudioTrun(
       const firstSample = trun.samples[0];
       removedSampleSize = firstSample.size ?? tfhd.defaultSampleSize;
       removedSampleDuration =
-        firstSample.duration ?? tfhd.defaultSampleDuration;
+        firstSample.duration ??
+        tfhd.defaultSampleDuration ??
+        defaultSampleDuration;
       if (removedSampleSize === undefined) {
         throw new Error('Cannot determine the first AAC sample size');
       }
@@ -583,7 +602,8 @@ function shiftAudioTfdt(
 
 function trimFirstAudioSample(
   buffer: Buffer,
-  audioTrackId: number
+  audioTrackId: number,
+  defaultSampleDuration?: number
 ): { buffer: Buffer; removedSampleDuration: number } {
   const topLevel = parseBoxes(buffer);
   const moof = topLevel.find((box) => box.type === 'moof');
@@ -598,7 +618,12 @@ function trimFirstAudioSample(
     throw new Error('Encrypted audio segments are not supported');
   }
 
-  const rewritten = rewriteAudioTrun(moof, audioTrackId, true);
+  const rewritten = rewriteAudioTrun(
+    moof,
+    audioTrackId,
+    true,
+    defaultSampleDuration
+  );
   if (
     rewritten.removedSampleSize === undefined ||
     rewritten.removedSampleDuration === undefined ||
@@ -687,7 +712,8 @@ async function processAudioRendition(audioDir: string): Promise<boolean> {
   const firstSegment = join(audioDir, segmentFiles[0]);
   const trimmedFirstSegment = trimFirstAudioSample(
     await readFile(firstSegment),
-    init.audioTrackId
+    init.audioTrackId,
+    init.defaultSampleDuration
   );
   if (trimmedFirstSegment.removedSampleDuration !== init.primingDuration) {
     logger.debug(
