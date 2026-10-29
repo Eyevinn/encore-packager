@@ -14,6 +14,20 @@ import {
 } from '@eyevinn/shaka-packager-s3/dist/packager';
 import { trimAacPrimingSamples } from './audioPrimingPostProcessor';
 import { updateAudioManifests } from './manifestPostProcessor';
+import type { AudioManifestOptions } from './manifestPostProcessor';
+
+function validatePackageOptions(options: PackageOptions): void {
+  const formatOptions = options.packageFormatOptions;
+  if (formatOptions?.hlsOnly && formatOptions.dashOnly) {
+    throw new Error('Cannot disable both hls and dash');
+  }
+  if (
+    formatOptions?.segmentSingleFileTemplate &&
+    !formatOptions.segmentSingleFileTemplate.includes('$KEY$')
+  ) {
+    throw new Error('segmentSingleFileTemplate must contain $KEY$');
+  }
+}
 
 async function removeDownloadedInputs(
   inputs: PackageOptions['inputs'],
@@ -54,12 +68,13 @@ function toDestinationUrl(destination: string): URL {
 
 /**
  * Package into a temporary local destination, apply the AAC priming
- * workaround, and upload the processed package through the public packager
- * API's normal destination mechanisms.
+ * workaround, and upload the processed package through shaka-packager-s3's
+ * published helper module.
  */
 export async function doPackageWithPostProcessing(
   options: PackageOptions
 ): Promise<void> {
+  validatePackageOptions(options);
   const tempParent = options.stagingDir || tmpdir();
   await mkdir(tempParent, { recursive: true });
   const outputDir = await prepare(join(tempParent, 'encore-packager-output'));
@@ -68,7 +83,14 @@ export async function doPackageWithPostProcessing(
     await removeDownloadedInputs(options.inputs, outputDir);
     const trimResult = await trimAacPrimingSamples(outputDir);
     if (trimResult) {
-      await updateAudioManifests(outputDir, trimResult);
+      const formatOptions = options.packageFormatOptions;
+      const manifestOptions: AudioManifestOptions = {
+        dashManifestName: formatOptions?.dashManifestName,
+        hlsManifestName: formatOptions?.hlsManifestName,
+        requireDashManifest: formatOptions?.hlsOnly !== true,
+        requireHlsManifest: formatOptions?.dashOnly !== true
+      };
+      await updateAudioManifests(outputDir, trimResult, manifestOptions);
     }
     await uploadPackage(
       toDestinationUrl(options.dest),

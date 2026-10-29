@@ -604,11 +604,13 @@ function adjustFirstSidx(
 
   const referenceCount = box.payload.readUInt16BE(offset - 2);
   if (referenceCount === 0 || box.payload.length < offset + 12) {
+    logger.warn('Skipping sidx adjustment: no complete media reference found');
     return box.raw;
   }
 
   const reference = box.payload.readUInt32BE(offset);
   if (reference & 0x80000000) {
+    logger.warn('Skipping sidx adjustment: first reference is not media data');
     return box.raw;
   }
 
@@ -849,6 +851,10 @@ async function processAudioRendition(
       return undefined;
     }
 
+    // Keep the compute phase separate from the write phase. Buffering the
+    // transformed segments ensures a parse/layout failure cannot partially
+    // modify this rendition; the wrapper's disposable staging directory also
+    // makes the all-at-once upload safe for the final destination.
     const laterSegments = [] as { path: string; buffer: Buffer }[];
     for (const segment of segmentFiles.slice(1)) {
       const path = join(audioDir, segment);
@@ -862,10 +868,19 @@ async function processAudioRendition(
       });
     }
 
-    await writeFile(initPath, init.buffer);
-    await writeFile(firstSegment, trimmedFirstSegment.buffer);
-    for (const segment of laterSegments) {
-      await writeFile(segment.path, segment.buffer);
+    try {
+      await writeFile(initPath, init.buffer);
+      await writeFile(firstSegment, trimmedFirstSegment.buffer);
+      for (const segment of laterSegments) {
+        await writeFile(segment.path, segment.buffer);
+      }
+    } catch (error) {
+      throw new Error(
+        `AAC priming post-processing write failed for ${audioDir}: ${
+          (error as Error).message
+        }`,
+        { cause: error }
+      );
     }
     logger.info(`Applied AAC priming post-processing to ${audioDir}`);
     return {
@@ -873,6 +888,13 @@ async function processAudioRendition(
       timescale: init.timescale
     };
   } catch (error) {
+    if (
+      (error as Error).message.startsWith(
+        'AAC priming post-processing write failed'
+      )
+    ) {
+      throw error;
+    }
     logger.warn(
       `Skipping AAC priming post-processing for ${audioDir}: ${
         (error as Error).message

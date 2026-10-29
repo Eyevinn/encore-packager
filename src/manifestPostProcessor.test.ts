@@ -57,4 +57,27 @@ describe('audio manifest post-processing', () => {
     expect(updatedMpd).toContain('duration="PT0.085334S"');
     expect(updatedMpd).toContain('<S t="0" d="1024"/>');
   });
+
+  it('updates a configured DASH manifest name and rejects a missing expected manifest', async () => {
+    const stagingDir = await mkdtemp(join(tmpdir(), 'encore-manifest-test-'));
+    await mkdir(join(stagingDir, 'audio'));
+    await writeFile(join(stagingDir, 'audio', '1.m4s'), 'segment');
+    await writeFile(join(stagingDir, 'audio', '2.m4s'), 'segment');
+    await writeFile(join(stagingDir, 'custom.mpd'), mpd(true));
+
+    await updateAudioManifests(stagingDir, result, {
+      dashManifestName: 'custom.mpd',
+      requireDashManifest: true
+    });
+    expect(await readFile(join(stagingDir, 'custom.mpd'), 'utf8')).toContain(
+      '<S t="0" d="1024"/>'
+    );
+
+    await expect(
+      updateAudioManifests(stagingDir, result, {
+        dashManifestName: 'missing.mpd',
+        requireDashManifest: true
+      })
+    ).rejects.toThrow('Expected DASH manifest was not generated');
+  });
 });

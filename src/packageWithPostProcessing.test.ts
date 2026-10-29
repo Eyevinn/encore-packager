@@ -126,4 +126,24 @@ describe('package post-processing wiring', () => {
 
     await expect(access(outsidePath)).resolves.toBeUndefined();
   });
+
+  it('retains the packager option validation on the post-processing path', async () => {
+    await expect(
+      doPackageWithPostProcessing({
+        inputs: [],
+        dest: join(parentDir, 'package'),
+        packageFormatOptions: { hlsOnly: true, dashOnly: true }
+      })
+    ).rejects.toThrow('Cannot disable both hls and dash');
+
+    await expect(
+      doPackageWithPostProcessing({
+        inputs: [],
+        dest: join(parentDir, 'package'),
+        packageFormatOptions: {
+          segmentSingleFileTemplate: 'audio.mp4'
+        }
+      })
+    ).rejects.toThrow('segmentSingleFileTemplate must contain $KEY$');
+  });
 });

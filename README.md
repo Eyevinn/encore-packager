@@ -75,6 +75,11 @@ uploading for both local and S3 destinations, so they are not published as
 part of the processed package. The generated audio HLS and DASH manifests are
 updated along with the media timeline.
 
+Configured DASH and HLS manifest names are respected. If a manifest expected
+for the selected output format is missing, or if post-processing cannot write
+the rewritten media, the packaging job fails rather than publishing a partial
+or stale package.
+
 The workaround applies only to segmented, clear AAC renditions. Encrypted audio
 and `segmentSingleFile` output are left unchanged. Unsupported or unexpected
 rendition layouts are skipped with a warning and the rest of the package is

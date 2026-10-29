@@ -3,6 +3,26 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { trimAacPrimingSamples } from './audioPrimingPostProcessor';
 
+let mockWriteFailureAfter = -1;
+let mockWriteCalls = 0;
+
+jest.mock('node:fs/promises', () => {
+  const actual =
+    jest.requireActual<typeof import('node:fs/promises')>('node:fs/promises');
+  return {
+    ...actual,
+    writeFile: (...args: unknown[]) => {
+      if (
+        mockWriteFailureAfter >= 0 &&
+        mockWriteCalls++ >= mockWriteFailureAfter
+      ) {
+        return Promise.reject(new Error('disk full'));
+      }
+      return actual.writeFile(...(args as Parameters<typeof actual.writeFile>));
+    }
+  };
+});
+
 function box(type: string, payload: Buffer): Buffer {
   const result = Buffer.alloc(payload.length + 8);
   result.writeUInt32BE(result.length, 0);
@@ -299,5 +319,20 @@ describe('AAC priming post-processing', () => {
     await expect(trimAacPrimingSamples(stagingDir)).resolves.toBeUndefined();
     expect(await readFile(join(audioDir, 'init.mp4'))).toEqual(makeInit(1024));
     expect(await readFile(join(audioDir, '1.m4s'))).toEqual(firstSegment);
+  });
+
+  it('propagates a media write failure instead of treating it as a no-op', async () => {
+    const stagingDir = await mkdtemp(join(tmpdir(), 'encore-packager-test-'));
+    const audioDir = join(stagingDir, 'audio');
+    await mkdir(audioDir);
+    await writeFile(join(audioDir, 'init.mp4'), makeInit(1024));
+    await writeFile(join(audioDir, '1.m4s'), makeSegment(0));
+
+    mockWriteFailureAfter = 1;
+    mockWriteCalls = 0;
+    await expect(trimAacPrimingSamples(stagingDir)).rejects.toThrow(
+      'AAC priming post-processing write failed'
+    );
+    mockWriteFailureAfter = -1;
   });
 });

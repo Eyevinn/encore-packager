@@ -10,6 +10,13 @@ type HlsManifestUpdate = {
 const AUDIO_PLAYLIST = 'audio.m3u8';
 const DASH_MANIFEST = 'manifest.mpd';
 
+export type AudioManifestOptions = {
+  dashManifestName?: string;
+  hlsManifestName?: string;
+  requireDashManifest?: boolean;
+  requireHlsManifest?: boolean;
+};
+
 function formatSeconds(value: number): string {
   return value.toFixed(6).replace(/0+$/, '').replace(/\.$/, '') || '0';
 }
@@ -240,6 +247,14 @@ async function readOptional(path: string): Promise<string | undefined> {
   }
 }
 
+async function readRequired(path: string, label: string): Promise<string> {
+  const content = await readOptional(path);
+  if (content === undefined) {
+    throw new Error(`Expected ${label} was not generated: ${path}`);
+  }
+  return content;
+}
+
 async function inferSegmentDurations(
   stagingDir: string,
   mpdContent: string,
@@ -271,12 +286,24 @@ async function inferSegmentDurations(
 
 export async function updateAudioManifests(
   stagingDir: string,
-  result: AacPrimingPostProcessingResult
+  result: AacPrimingPostProcessingResult,
+  options: AudioManifestOptions = {}
 ): Promise<void> {
   const hlsPath = join(stagingDir, AUDIO_PLAYLIST);
-  const mpdPath = join(stagingDir, DASH_MANIFEST);
-  const originalHls = await readOptional(hlsPath);
-  const originalMpd = await readOptional(mpdPath);
+  const hlsMasterPath = join(
+    stagingDir,
+    options.hlsManifestName || 'index.m3u8'
+  );
+  const mpdPath = join(stagingDir, options.dashManifestName || DASH_MANIFEST);
+  if (options.requireHlsManifest) {
+    await readRequired(hlsMasterPath, 'HLS master manifest');
+  }
+  const originalHls = options.requireHlsManifest
+    ? await readRequired(hlsPath, 'HLS audio manifest')
+    : await readOptional(hlsPath);
+  const originalMpd = options.requireDashManifest
+    ? await readRequired(mpdPath, 'DASH manifest')
+    : await readOptional(mpdPath);
   if (!originalHls && !originalMpd) return;
 
   const hlsUpdate = originalHls
@@ -292,6 +319,21 @@ export async function updateAudioManifests(
   const updatedMpd = originalMpd
     ? updateMpdManifest(originalMpd, segmentDurations, result)
     : undefined;
+
+  if (options.requireHlsManifest && !hlsUpdate) {
+    throw new Error(
+      `Expected HLS audio manifest has no media segments: ${hlsPath}`
+    );
+  }
+  if (
+    options.requireDashManifest &&
+    updatedMpd !== undefined &&
+    updatedMpd === originalMpd
+  ) {
+    throw new Error(
+      `DASH manifest has no updatable audio timeline: ${mpdPath}`
+    );
+  }
 
   if (hlsUpdate) await writeFile(hlsPath, hlsUpdate.content);
   if (updatedMpd !== undefined) await writeFile(mpdPath, updatedMpd);
