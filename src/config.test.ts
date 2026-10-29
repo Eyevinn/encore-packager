@@ -15,7 +15,8 @@ describe('Test parse download retry config', () => {
     'DOWNLOAD_RETRY_COUNT',
     'DOWNLOAD_RETRY_DELAY_SECONDS',
     'DOWNLOAD_MAX_TIME_SECONDS',
-    'DOWNLOAD_APP_RETRY_ATTEMPTS'
+    'DOWNLOAD_APP_RETRY_ATTEMPTS',
+    'TRIM_AAC_PRIMING_SAMPLES'
   ];
 
   afterEach(() => {
@@ -36,6 +37,12 @@ describe('Test parse download retry config', () => {
     expect(packaging.downloadAppRetryAttempts).toEqual(
       DEFAULT_DOWNLOAD_APP_RETRY_ATTEMPTS
     );
+    expect(packaging.trimAacPrimingSamples).toBe(false);
+  });
+
+  it('enables AAC priming post-processing only when explicitly requested', () => {
+    process.env.TRIM_AAC_PRIMING_SAMPLES = 'true';
+    expect(readConfig().packaging.trimAacPrimingSamples).toBe(true);
   });
 
   it('parses overrides for all download retry settings from env vars', () => {

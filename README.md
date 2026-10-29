@@ -61,6 +61,30 @@ In skip packaging mode, the tool will:
 - Support both local file copying and HTTP(S) URL downloading
 - Create the same output folder structure as standard packaging mode
 
+#### AAC priming workaround
+
+Set `TRIM_AAC_PRIMING_SAMPLES=true` to enable the opt-in post-packaging AAC
+priming workaround. It is disabled by default and is configured through the
+service environment; there is no CLI flag. When enabled, the packaged output
+is staged locally, rewritten, and uploaded a second time, so it requires extra
+temporary disk space and time. For S3 destinations, the `aws` CLI must be
+available to perform the upload.
+
+Downloaded source inputs are removed from the temporary staging tree before
+uploading for both local and S3 destinations, so they are not published as
+part of the processed package. The generated audio HLS and DASH manifests are
+updated along with the media timeline.
+
+Configured DASH and HLS manifest names are respected. If a manifest expected
+for the selected output format is missing, or if post-processing cannot write
+the rewritten media, the packaging job fails rather than publishing a partial
+or stale package.
+
+The workaround applies only to segmented, clear AAC renditions. Encrypted audio
+and `segmentSingleFile` output are left unchanged. Unsupported or unexpected
+rendition layouts are skipped with a warning and the rest of the package is
+still uploaded.
+
 ### Running as a service
 
 When running as a service, the packager can be configured to use skip packaging mode for all jobs by setting the `SKIP_PACKAGING` environment variable.
@@ -193,6 +217,7 @@ encryption or when the instance runs with `SKIP_PACKAGING=true`.
 | `S3_ENDPOINT_URL`             | Optional S3 Endpoint URL when `PACKAGE_OUTPUT_FOLDER` is an S3 bucket not on AWS                                                                                                                                                      |                          |
 | `CALLBACK_URL`                | Optional callback service url. If enabled, the packager will send callbacks on packaging success or failure. To use baisc auth, provide the URL in the format `https://user:password@hostname/path`                                   |                          |
 | `SKIP_PACKAGING`              | Skip Shaka Packager and copy MP4 files with SMIL generation instead. Set to `true` to enable                                                                                                                                          | `false`                  |
+| `TRIM_AAC_PRIMING_SAMPLES`    | Apply the post-packaging AAC priming workaround: remove the audio init edit list, drop the first audio sample, and shift later audio `tfdt` values by the removed priming sample duration                                             | `false`                  |
 | `SMIL_BASE_URL`               | Optional base URL to include in generated SMIL files. Used for resolving relative video file paths                                                                                                                                    |                          |
 
 ##### Stream key templates

@@ -16,6 +16,7 @@ import {
   redactEncryption,
   redactKeyMaterialInText
 } from './encryption';
+import { doPackageWithPostProcessing } from './packageWithPostProcessing';
 
 /**
  * `PackageOptions` plus the per-job `encryption` member that
@@ -81,7 +82,10 @@ export class EncorePackager {
     const dest = this.getPackageDestination(job);
     const packageFormatOptions = this.getPackageFormatOptions(job);
     try {
-      await doPackage({
+      const packageFunction = this.config.trimAacPrimingSamples
+        ? doPackageWithPostProcessing
+        : doPackage;
+      await packageFunction({
         dest,
         s3EndpointUrl: this.config.s3EndpointUrl,
         inputs,
