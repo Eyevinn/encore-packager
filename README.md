@@ -194,6 +194,13 @@ encryption or when the instance runs with `SKIP_PACKAGING=true`.
 | `CALLBACK_URL`                | Optional callback service url. If enabled, the packager will send callbacks on packaging success or failure. To use baisc auth, provide the URL in the format `https://user:password@hostname/path`                                   |                          |
 | `SKIP_PACKAGING`              | Skip Shaka Packager and copy MP4 files with SMIL generation instead. Set to `true` to enable                                                                                                                                          | `false`                  |
 | `SMIL_BASE_URL`               | Optional base URL to include in generated SMIL files. Used for resolving relative video file paths                                                                                                                                    |                          |
+| `INCLUDE_INPUT_SOURCES`       | Keep the input source files (the Encore output renditions the packager reads) in the packaged output. By default the output contains only the generated segments, playlists and manifests. Set to `true` to enable                    | `false`                  |
+
+##### Packaged output contents
+
+The packaged output contains the generated segments, playlists and manifests. The input sources, meaning the Encore output renditions that Shaka Packager reads, are not part of the package and are removed from the output. Set `INCLUDE_INPUT_SOURCES=true` to keep them.
+
+This does not apply to skip packaging mode (`SKIP_PACKAGING=true`), where the MP4 files and the generated SMIL file are the output.
 
 ##### Stream key templates
 

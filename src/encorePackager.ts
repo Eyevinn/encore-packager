@@ -4,12 +4,21 @@ import {
   PackageOptions,
   PackageFormatOptions
 } from '@eyevinn/shaka-packager-s3';
-import { resolve } from 'node:path';
+// `toUrl()` is the helper the packager itself normalises `dest` with, but it is
+// not re-exported from the package root (`dist/index.d.ts` exports only
+// `Input`, `doPackage`, `PackageOptions` and `PackageFormatOptions`). The
+// package declares no `exports` map, so the module path resolves, and importing
+// the real function keeps the destination handling here from drifting away from
+// `uploadPackage()`. See `node_modules/@eyevinn/shaka-packager-s3/dist/util.js`
+// lines 15-20 (and `dist/util.d.ts` for the signature).
+import { toUrl } from '@eyevinn/shaka-packager-s3/dist/util';
+import { resolve, join } from 'node:path';
 import { PackagingConfig, StreamKeyTemplates } from './config';
 import { basename, extname } from 'node:path';
 import { Context } from '@osaas/client-core';
 import logger from './logger';
 import { SmilGenerator } from './smilGenerator';
+import { unlink } from 'node:fs/promises';
 import {
   EncryptionOptions,
   assertEncryptionSupported,
@@ -70,7 +79,10 @@ export class EncorePackager {
       );
     }
     const job = await this.getEncoreJob(jobUrl);
-    const inputs = parseInputsFromEncoreJob(job, this.config.streamKeysConfig);
+    const parsedInputs = parseInputsFromEncoreJob(
+      job,
+      this.config.streamKeysConfig
+    );
     let serviceAccessToken = undefined;
     if (this.config.oscAccessToken) {
       const ctx = new Context({
@@ -78,6 +90,15 @@ export class EncorePackager {
       });
       serviceAccessToken = await ctx.getServiceAccessToken('encore');
     }
+    const source = this.config.oscAccessToken
+      ? new URL(jobUrl).origin
+      : undefined;
+    // The input sources are the Encore renditions the packager reads; they are
+    // not part of the package itself and are excluded from the output unless
+    // explicitly asked for.
+    const inputs = this.config.includeInputSources
+      ? parsedInputs
+      : resolveInputSourceUrls(parsedInputs, source);
     const dest = this.getPackageDestination(job);
     const packageFormatOptions = this.getPackageFormatOptions(job);
     try {
@@ -85,7 +106,7 @@ export class EncorePackager {
         dest,
         s3EndpointUrl: this.config.s3EndpointUrl,
         inputs,
-        source: this.config.oscAccessToken ? new URL(jobUrl).origin : undefined,
+        source,
         serviceAccessToken,
         noImplicitAudio: true,
         shakaExecutable: this.config.shakaExecutable,
@@ -102,6 +123,12 @@ export class EncorePackager {
           encryption
         )
       );
+    }
+    if (!this.config.includeInputSources) {
+      // Only after a successful run, and only for a local destination: the
+      // packager keeps staged sources out of an S3 upload itself. Cleanup
+      // failures are logged, not thrown, so they cannot fail a good job.
+      await removeInputSourcesFromOutput(dest, inputs);
     }
     logger.info(`Finished packaging of job ${job.id} to output folder ${dest}`);
     if (URL.canParse(dest)) {
@@ -211,6 +238,156 @@ export class EncorePackager {
       );
     }
     return (await response.json()) as EncoreJob;
+  }
+}
+
+/**
+ * Rewrite input source filenames to absolute URLs when the sources are fetched
+ * from a remote HTTP source.
+ *
+ * Why: `download()` in @eyevinn/shaka-packager-s3@0.6.3
+ * (`node_modules/@eyevinn/shaka-packager-s3/dist/packager.js`) stages an HTTP
+ * source as `join(stagingDir, basename(input.filename))`, but
+ * `removeDownloadedFiles()` — the upstream step that keeps source files out of
+ * an S3 upload — looks for `join(stagingDir, input.filename)` unless the
+ * filename contains `://`. Encore reports `output[].file` as a plain path
+ * (e.g. `/data/out/<jobId>/asset_x264_3100.mp4`), so the two disagree, the
+ * source file is never removed from the staging dir and `aws s3 cp
+ * --recursive` uploads it alongside the segments and playlists. Passing an
+ * absolute URL makes both use `basename()`, so the sources are dropped before
+ * the upload instead of being uploaded and deleted afterwards.
+ *
+ * The resulting URL is the same one upstream builds for the download itself
+ * (`new URL(filePath, baseUrl)` against the source origin), so this does not
+ * change which file is fetched.
+ */
+export function resolveInputSourceUrls(
+  inputs: Input[],
+  source?: string
+): Input[] {
+  if (!source) {
+    // Without a source, upstream `download()` hands the filename straight to
+    // the packager and never copies anything into the package directory.
+    return inputs;
+  }
+  let sourceUrl: URL;
+  try {
+    sourceUrl = new URL(source);
+  } catch {
+    return inputs;
+  }
+  if (sourceUrl.protocol !== 'http:' && sourceUrl.protocol !== 'https:') {
+    // Upstream resolves s3: sources differently; leave those untouched.
+    return inputs;
+  }
+  return inputs.map((input) => {
+    if (input.filename.includes('://')) {
+      return input;
+    }
+    return {
+      ...input,
+      filename: new URL(input.filename, sourceUrl).toString()
+    };
+  });
+}
+
+/**
+ * Names the input source files get when they are copied into the package
+ * output. Only inputs that upstream `download()` actually fetches into the
+ * staging directory (remote URLs) can end up there; local paths are read in
+ * place and must never be deleted.
+ *
+ * Mirrors `basename(input.filename)` from `download()` in
+ * @eyevinn/shaka-packager-s3@0.6.3 (`dist/packager.js`), which is the name the
+ * staged copy is written under.
+ */
+export function inputSourceFilesInOutput(inputs: Input[]): string[] {
+  const names = new Set<string>();
+  for (const input of inputs) {
+    if (!input.filename.includes('://')) {
+      continue;
+    }
+    let url: URL;
+    try {
+      url = new URL(input.filename);
+    } catch {
+      continue;
+    }
+    if (url.protocol === 'file:') {
+      continue;
+    }
+    const name = basename(input.filename);
+    if (name.length > 0) {
+      names.add(name);
+    }
+  }
+  return [...names];
+}
+
+/**
+ * Remove any input source files that were copied into the package output, so
+ * the output holds only the generated segments, playlists and manifests.
+ *
+ * Only a local destination needs this. For an `s3:` destination the packager
+ * already drops the staged sources *before* the upload: `doPackage()` in
+ * @eyevinn/shaka-packager-s3@0.6.3
+ * (`node_modules/@eyevinn/shaka-packager-s3/dist/packager.js` lines 52-56)
+ * runs `removeDownloadedFiles()` and only then `uploadPackage()`, and that
+ * removal resolves the staged copy as `join(stagingDir,
+ * basename(input.filename))` exactly when the filename contains `://`
+ * (`dist/packager.js` lines 161-164) — the form `resolveInputSourceUrls()`
+ * produces. The sources are therefore never uploaded, so there is no remote
+ * object to delete afterwards.
+ *
+ * Generated files cannot collide with these names: segments and playlists are
+ * named from the stream keys (`video-$KEY$`, `audio`) and the manifest name
+ * templates, never from the Encore rendition filename.
+ *
+ * A failed cleanup is logged but does not fail an otherwise successful job.
+ */
+export async function removeInputSourcesFromOutput(
+  dest: string,
+  inputs: Input[]
+): Promise<void> {
+  const files = inputSourceFilesInOutput(inputs);
+  if (files.length === 0) {
+    return;
+  }
+  // Normalise `dest` the way the packager does: a string with a scheme is
+  // parsed as-is, anything else becomes `file://${resolve(dest)}`
+  // (`dist/util.js` lines 15-20).
+  const destUrl = toUrl(dest);
+  if (destUrl.protocol !== 'file:') {
+    logger.debug(
+      `Input sources need no cleanup in ${dest}: the packager removes them before uploading to a ${destUrl.protocol} destination`
+    );
+    return;
+  }
+  // `uploadPackage()` moves each staged file to `join(dest.pathname, file)`
+  // for a local destination (`dist/packager.js` lines 180-184). `toUrl()`
+  // percent-encodes the path, so the package lands under the encoded
+  // pathname, which is not the same string as a raw `dest` that needs
+  // encoding — and for a `file://` dest the raw string is no path at all.
+  const destDir = destUrl.pathname;
+  for (const file of files) {
+    const path = join(destDir, file);
+    try {
+      await unlink(path);
+      logger.info(`Removed input source ${path} from packaged output`);
+    } catch (err) {
+      const { code, message } = err as NodeJS.ErrnoException;
+      if (code === 'ENOENT') {
+        // Not fatal, but it means this function and the packager disagree
+        // about where the output went, so make the miss visible.
+        logger.warn(
+          `Expected input source ${path} in the packaged output, but it was not there; nothing removed`
+        );
+        continue;
+      }
+      logger.warn(
+        `Failed to remove input source ${file} from ${destDir}: ${message}`
+      );
+    }
   }
 }
 
