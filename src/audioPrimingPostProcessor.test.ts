@@ -39,7 +39,18 @@ function makeInit(
     'mdia',
     Buffer.concat([
       box('hdlr', fullBox(0, 0, hdlr)),
-      box('mdhd', Buffer.alloc(8)),
+      box(
+        'mdhd',
+        fullBox(
+          0,
+          0,
+          (() => {
+            const payload = Buffer.alloc(16);
+            payload.writeUInt32BE(48000, 8);
+            return payload;
+          })()
+        )
+      ),
       box('minf', box('stbl', stsd))
     ])
   );
@@ -86,10 +97,14 @@ function makeInit(
   ]);
 }
 
-function makeTfhd(): Buffer {
-  const payload = Buffer.alloc(8);
+function makeTfhd(baseDataOffsetPresent = false): Buffer {
+  const payload = Buffer.alloc(baseDataOffsetPresent ? 16 : 8);
   payload.writeUInt32BE(7, 0);
-  return box('tfhd', fullBox(0, 0x000010, payload));
+  if (baseDataOffsetPresent) payload.writeBigUInt64BE(0n, 4);
+  return box(
+    'tfhd',
+    fullBox(0, 0x020010 | (baseDataOffsetPresent ? 0x000001 : 0), payload)
+  );
 }
 
 function makeTfdt(value: number): Buffer {
@@ -144,13 +159,14 @@ function makeSegment(
   includeDuration = true,
   sidxVersion = 0,
   sidxEarliestPresentationTime = tfdt,
-  extraTrafChild?: Buffer
+  extraTrafChild?: Buffer,
+  baseDataOffsetPresent = false
 ): Buffer {
   const mfhd = box('mfhd', fullBox(0, 0, Buffer.alloc(4)));
   const trafWithPlaceholder = box(
     'traf',
     Buffer.concat([
-      makeTfhd(),
+      makeTfhd(baseDataOffsetPresent),
       makeTfdt(tfdt),
       makeTrun(0, includeDuration),
       ...(extraTrafChild ? [extraTrafChild] : [])
@@ -161,7 +177,7 @@ function makeSegment(
   const correctedTraf = box(
     'traf',
     Buffer.concat([
-      makeTfhd(),
+      makeTfhd(baseDataOffsetPresent),
       makeTfdt(tfdt),
       makeTrun(dataOffset, includeDuration),
       ...(extraTrafChild ? [extraTrafChild] : [])
@@ -265,6 +281,19 @@ describe('AAC priming post-processing', () => {
       0,
       box('senc', fullBox(0, 0, Buffer.alloc(4)))
     );
+    await writeFile(join(audioDir, '1.m4s'), firstSegment);
+
+    await expect(trimAacPrimingSamples(stagingDir)).resolves.toBeUndefined();
+    expect(await readFile(join(audioDir, 'init.mp4'))).toEqual(makeInit(1024));
+    expect(await readFile(join(audioDir, '1.m4s'))).toEqual(firstSegment);
+  });
+
+  it('leaves a rendition unchanged when tfhd uses base_data_offset', async () => {
+    const stagingDir = await mkdtemp(join(tmpdir(), 'encore-packager-test-'));
+    const audioDir = join(stagingDir, 'audio');
+    await mkdir(audioDir);
+    await writeFile(join(audioDir, 'init.mp4'), makeInit(1024));
+    const firstSegment = makeSegment(0, true, 0, 0, undefined, true);
     await writeFile(join(audioDir, '1.m4s'), firstSegment);
 
     await expect(trimAacPrimingSamples(stagingDir)).resolves.toBeUndefined();

@@ -2,6 +2,9 @@ import { mkdir, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
+// shaka-packager-s3 0.6.3 publishes these helpers from this module but does
+// not re-export them from its entrypoint. The dependency is pinned to keep
+// this published module path stable until the upstream exports are fixed.
 import {
   cleanup,
   createPackage,
@@ -10,6 +13,7 @@ import {
   uploadPackage
 } from '@eyevinn/shaka-packager-s3/dist/packager';
 import { trimAacPrimingSamples } from './audioPrimingPostProcessor';
+import { updateAudioManifests } from './manifestPostProcessor';
 
 async function removeDownloadedInputs(
   inputs: PackageOptions['inputs'],
@@ -60,9 +64,12 @@ export async function doPackageWithPostProcessing(
   await mkdir(tempParent, { recursive: true });
   const outputDir = await prepare(join(tempParent, 'encore-packager-output'));
   try {
-    await createPackage({ ...options, dest: outputDir, stagingDir: outputDir });
+    await createPackage({ ...options, stagingDir: outputDir });
     await removeDownloadedInputs(options.inputs, outputDir);
-    await trimAacPrimingSamples(outputDir);
+    const trimResult = await trimAacPrimingSamples(outputDir);
+    if (trimResult) {
+      await updateAudioManifests(outputDir, trimResult);
+    }
     await uploadPackage(
       toDestinationUrl(options.dest),
       outputDir,

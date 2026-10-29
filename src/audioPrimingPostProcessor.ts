@@ -8,7 +8,10 @@ const TRUN_SAMPLE_DURATION_PRESENT = 0x000100;
 const TRUN_SAMPLE_SIZE_PRESENT = 0x000200;
 const TRUN_SAMPLE_FLAGS_PRESENT = 0x000400;
 const TRUN_SAMPLE_COMPOSITION_TIME_OFFSET_PRESENT = 0x000800;
+const TFHD_BASE_DATA_OFFSET_PRESENT = 0x000001;
+const TFHD_DEFAULT_SAMPLE_FLAGS_PRESENT = 0x000020;
 const TFHD_DEFAULT_SAMPLE_SIZE_PRESENT = 0x000010;
+const TFHD_DEFAULT_BASE_IS_MOOF_PRESENT = 0x020000;
 
 type Mp4Box = {
   type: string;
@@ -36,15 +39,25 @@ type ParsedTrun = {
 
 type ParsedTfhd = {
   trackId: number;
+  baseDataOffsetPresent: boolean;
+  defaultBaseIsMoof: boolean;
   defaultSampleDuration?: number;
   defaultSampleSize?: number;
+  defaultSampleFlags?: number;
 };
 
 type AudioInitInfo = {
   buffer: Buffer;
   audioTrackId: number;
   primingDuration: number;
+  timescale: number;
   defaultSampleDuration?: number;
+  defaultSampleFlags?: number;
+};
+
+export type AacPrimingPostProcessingResult = {
+  primingDuration: number;
+  timescale: number;
 };
 
 function parseBoxes(buffer: Buffer, start = 0, end = buffer.length): Mp4Box[] {
@@ -141,10 +154,17 @@ function readTfhd(box: Mp4Box): ParsedTfhd {
 
   let offset = 8;
   const result: ParsedTfhd = {
-    trackId: box.payload.readUInt32BE(4)
+    trackId: box.payload.readUInt32BE(4),
+    baseDataOffsetPresent: Boolean(flags & TFHD_BASE_DATA_OFFSET_PRESENT),
+    defaultBaseIsMoof: Boolean(flags & TFHD_DEFAULT_BASE_IS_MOOF_PRESENT)
   };
 
-  if (flags & 0x000001) offset += 8;
+  if (flags & TFHD_BASE_DATA_OFFSET_PRESENT) {
+    if (box.payload.length < offset + 8) {
+      throw new Error('Invalid tfhd base data offset');
+    }
+    offset += 8;
+  }
   if (flags & 0x000002) offset += 4;
   if (flags & 0x000008) {
     if (box.payload.length < offset + 4) {
@@ -158,6 +178,13 @@ function readTfhd(box: Mp4Box): ParsedTfhd {
       throw new Error('Invalid tfhd default sample size');
     }
     result.defaultSampleSize = box.payload.readUInt32BE(offset);
+    offset += 4;
+  }
+  if (flags & TFHD_DEFAULT_SAMPLE_FLAGS_PRESENT) {
+    if (box.payload.length < offset + 4) {
+      throw new Error('Invalid tfhd default sample flags');
+    }
+    result.defaultSampleFlags = box.payload.readUInt32BE(offset);
   }
 
   return result;
@@ -307,6 +334,16 @@ function readTrackId(trak: Mp4Box): number | undefined {
   return tkhd.payload.readUInt32BE(offset);
 }
 
+function readTrackTimescale(trak: Mp4Box): number | undefined {
+  const mdia = findChild(trak, 'mdia');
+  const mdhd = mdia && findChild(mdia, 'mdhd');
+  if (!mdhd) return undefined;
+  const version = fullBoxVersion(mdhd.payload);
+  const offset = version === 1 ? 20 : 12;
+  if (mdhd.payload.length < offset + 4) return undefined;
+  return mdhd.payload.readUInt32BE(offset);
+}
+
 function readPrimingDuration(trak: Mp4Box): number | undefined {
   const edts = findChild(trak, 'edts');
   const elst = edts && findChild(edts, 'elst');
@@ -357,15 +394,18 @@ function readAudioSampleEntry(trak: Mp4Box): {
 function readTrexDefaultSampleDuration(
   moov: Mp4Box,
   trackId: number
-): number | undefined {
+): { duration?: number; flags?: number } {
   const mvex = findChild(moov, 'mvex');
-  if (!mvex) return undefined;
+  if (!mvex) return {};
   const trex = parseBoxes(mvex.payload).find((child) => {
     if (child.type !== 'trex' || child.payload.length < 16) return false;
     return child.payload.readUInt32BE(4) === trackId;
   });
-  if (!trex || trex.payload.length < 16) return undefined;
-  return trex.payload.readUInt32BE(12);
+  if (!trex || trex.payload.length < 16) return {};
+  return {
+    duration: trex.payload.readUInt32BE(12),
+    flags: trex.payload.length >= 24 ? trex.payload.readUInt32BE(20) : undefined
+  };
 }
 
 function isAudioTrack(trak: Mp4Box): boolean {
@@ -387,6 +427,7 @@ function inspectAndRemoveAudioEditList(
 
   let audioTrackId: number | undefined;
   let primingDuration: number | undefined;
+  let timescale: number | undefined;
   let audioSampleEntry: { type?: string; encrypted: boolean } | undefined;
   const moovChildren = parseBoxes(moov.payload);
   const transformedMoovChildren = moovChildren.map((child) => {
@@ -399,6 +440,7 @@ function inspectAndRemoveAudioEditList(
     }
     audioTrackId = trackId;
     primingDuration = readPrimingDuration(child);
+    timescale = readTrackTimescale(child);
     audioSampleEntry = readAudioSampleEntry(child);
 
     const trakChildren = parseBoxes(child.payload).filter(
@@ -414,17 +456,21 @@ function inspectAndRemoveAudioEditList(
   if (audioSampleEntry.encrypted || audioSampleEntry.type !== 'mp4a') {
     return undefined;
   }
-  if (primingDuration === undefined) return undefined;
+  if (primingDuration === undefined || timescale === undefined)
+    return undefined;
 
   const transformedMoov = replaceChildren(moov, transformedMoovChildren);
   const transformedTopLevel = topLevel.map((box) =>
     box === moov ? transformedMoov : serializeBox(box)
   );
+  const trexDefaults = readTrexDefaultSampleDuration(moov, audioTrackId);
   return {
     buffer: Buffer.concat(transformedTopLevel),
     audioTrackId,
     primingDuration,
-    defaultSampleDuration: readTrexDefaultSampleDuration(moov, audioTrackId)
+    timescale,
+    defaultSampleDuration: trexDefaults.duration,
+    defaultSampleFlags: trexDefaults.flags
   };
 }
 
@@ -432,7 +478,8 @@ function rewriteAudioTrun(
   moof: Mp4Box,
   audioTrackId: number,
   removeFirstSample: boolean,
-  defaultSampleDuration?: number
+  defaultSampleDuration?: number,
+  defaultSampleFlags?: number
 ): {
   buffer: Buffer;
   removedSampleSize?: number;
@@ -453,6 +500,11 @@ function rewriteAudioTrun(
     }
 
     const tfhd = readTfhd(tfhdBox);
+    if (tfhd.baseDataOffsetPresent || !tfhd.defaultBaseIsMoof) {
+      throw new Error(
+        'Cannot trim audio without default-base-is-moof and no base_data_offset'
+      );
+    }
     const transformedTrun = trafChildren.map((trafChild) => {
       if (trafChild.type !== 'trun' || removed || !removeFirstSample) {
         return serializeBox(trafChild);
@@ -478,6 +530,18 @@ function rewriteAudioTrun(
       }
       if (trun.dataOffset === undefined) {
         throw new Error('Cannot trim an audio trun without data_offset');
+      }
+
+      if (trun.flags & TRUN_FIRST_SAMPLE_FLAGS_PRESENT) {
+        const defaultFlags = tfhd.defaultSampleFlags ?? defaultSampleFlags ?? 0;
+        if (
+          !(trun.flags & TRUN_SAMPLE_FLAGS_PRESENT) &&
+          trun.firstSampleFlags !== defaultFlags
+        ) {
+          throw new Error(
+            'Cannot trim an audio trun with first-sample flags that differ from the default'
+          );
+        }
       }
 
       originalDataOffset = trun.dataOffset;
@@ -646,7 +710,8 @@ function shiftAudioTfdt(
 function trimFirstAudioSample(
   buffer: Buffer,
   audioTrackId: number,
-  defaultSampleDuration?: number
+  defaultSampleDuration?: number,
+  defaultSampleFlags?: number
 ): { buffer: Buffer; removedSampleDuration: number } {
   const topLevel = parseBoxes(buffer);
   const moof = topLevel.find((box) => box.type === 'moof');
@@ -673,7 +738,8 @@ function trimFirstAudioSample(
     moof,
     audioTrackId,
     true,
-    defaultSampleDuration
+    defaultSampleDuration,
+    defaultSampleFlags
   );
   if (
     rewritten.removedSampleSize === undefined ||
@@ -737,12 +803,14 @@ function segmentNumber(filename: string): number {
   return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
 }
 
-async function processAudioRendition(audioDir: string): Promise<boolean> {
+async function processAudioRendition(
+  audioDir: string
+): Promise<AacPrimingPostProcessingResult | undefined> {
   const initPath = join(audioDir, 'init.mp4');
   try {
     await stat(initPath);
   } catch {
-    return false;
+    return undefined;
   }
 
   try {
@@ -751,7 +819,7 @@ async function processAudioRendition(audioDir: string): Promise<boolean> {
       logger.warn(
         `Skipping AAC priming post-processing for ${audioDir}: not an eligible clear AAC rendition`
       );
-      return false;
+      return undefined;
     }
 
     const segmentFiles = (await readdir(audioDir)).filter((file) =>
@@ -764,20 +832,21 @@ async function processAudioRendition(audioDir: string): Promise<boolean> {
       logger.warn(
         `Skipping AAC priming post-processing for ${audioDir}: no segmented audio files`
       );
-      return false;
+      return undefined;
     }
 
     const firstSegment = join(audioDir, segmentFiles[0]);
     const trimmedFirstSegment = trimFirstAudioSample(
       await readFile(firstSegment),
       init.audioTrackId,
-      init.defaultSampleDuration
+      init.defaultSampleDuration,
+      init.defaultSampleFlags
     );
     if (trimmedFirstSegment.removedSampleDuration !== init.primingDuration) {
       logger.warn(
         `Skipping AAC priming post-processing for ${audioDir}: edit-list duration ${init.primingDuration} does not match first sample duration ${trimmedFirstSegment.removedSampleDuration}`
       );
-      return false;
+      return undefined;
     }
 
     const laterSegments = [] as { path: string; buffer: Buffer }[];
@@ -799,31 +868,37 @@ async function processAudioRendition(audioDir: string): Promise<boolean> {
       await writeFile(segment.path, segment.buffer);
     }
     logger.info(`Applied AAC priming post-processing to ${audioDir}`);
-    return true;
+    return {
+      primingDuration: trimmedFirstSegment.removedSampleDuration,
+      timescale: init.timescale
+    };
   } catch (error) {
     logger.warn(
       `Skipping AAC priming post-processing for ${audioDir}: ${
         (error as Error).message
       }`
     );
-    return false;
+    return undefined;
   }
 }
 
-export async function trimAacPrimingSamples(stagingDir: string): Promise<void> {
+export async function trimAacPrimingSamples(
+  stagingDir: string
+): Promise<AacPrimingPostProcessingResult | undefined> {
   const entries = await readdir(stagingDir, { withFileTypes: true });
-  const audioRenditions = entries.filter((entry) => entry.isDirectory());
-  let processed = 0;
+  const audioRendition = entries.find(
+    (entry) => entry.isDirectory() && entry.name === 'audio'
+  );
 
-  for (const rendition of audioRenditions) {
-    if (await processAudioRendition(join(stagingDir, rendition.name))) {
-      processed += 1;
-    }
-  }
-
-  if (processed === 0) {
-    logger.warn(
-      'AAC priming post-processing was enabled, but no eligible segmented AAC renditions were found; encrypted or segmentSingleFile output is left unchanged'
+  if (audioRendition) {
+    const result = await processAudioRendition(
+      join(stagingDir, audioRendition.name)
     );
+    if (result) return result;
   }
+
+  logger.warn(
+    'AAC priming post-processing was enabled, but no eligible segmented AAC rendition was found; encrypted or segmentSingleFile output is left unchanged'
+  );
+  return undefined;
 }

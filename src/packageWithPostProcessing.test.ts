@@ -77,12 +77,11 @@ describe('package post-processing wiring', () => {
 
     expect(mockCreatePackage).toHaveBeenCalledWith(
       expect.objectContaining({
-        dest: expect.any(String),
         stagingDir: expect.any(String)
       })
     );
     const createOptions = mockCreatePackage.mock.calls[0][0];
-    expect(createOptions.dest).toBe(createOptions.stagingDir);
+    expect(createOptions.dest).toBe(destination);
     expect(uploadedInputWasPresent).toBe(false);
     expect(mockTrimAacPrimingSamples).toHaveBeenCalledWith(
       createOptions.stagingDir

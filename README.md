@@ -70,6 +70,11 @@ is staged locally, rewritten, and uploaded a second time, so it requires extra
 temporary disk space and time. For S3 destinations, the `aws` CLI must be
 available to perform the upload.
 
+Downloaded source inputs are removed from the temporary staging tree before
+uploading for both local and S3 destinations, so they are not published as
+part of the processed package. The generated audio HLS and DASH manifests are
+updated along with the media timeline.
+
 The workaround applies only to segmented, clear AAC renditions. Encrypted audio
 and `segmentSingleFile` output are left unchanged. Unsupported or unexpected
 rendition layouts are skipped with a warning and the rest of the package is
