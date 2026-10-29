@@ -1,4 +1,9 @@
 import { Input } from '@eyevinn/shaka-packager-s3';
+// Same helper `uploadPackage()` resolves the destination with, imported from
+// the installed package so these tests pin real upstream behaviour rather than
+// a local restatement of it (`dist/util.js` lines 15-20).
+import { toUrl } from '@eyevinn/shaka-packager-s3/dist/util';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +13,17 @@ import {
   resolveInputSourceUrls
 } from './encorePackager';
 import { readConfig } from './config';
+import logger from './logger';
+
+// Nothing in this path may shell out any more: removing an input source from an
+// `s3:` destination was unreachable work, because `doPackage()` deletes the
+// staged sources before it uploads (`dist/packager.js` lines 52-56). Mocking
+// the module rather than spying keeps this a guard against it coming back,
+// since `spawnSync` itself is not a redefinable property.
+jest.mock('node:child_process', () => ({
+  ...jest.requireActual('node:child_process'),
+  spawnSync: jest.fn()
+}));
 
 const encoreInputs: Input[] = [
   {
@@ -140,6 +156,95 @@ describe('removeInputSourcesFromOutput', () => {
       ])
     ).resolves.toBeUndefined();
     expect(await readdir(dest)).toEqual(['index.m3u8']);
+  });
+});
+
+describe('removeInputSourcesFromOutput destination handling', () => {
+  const remoteInputs = resolveInputSourceUrls(
+    encoreInputs,
+    'https://encore.example.com'
+  );
+
+  /**
+   * Lay out a destination the way `uploadPackage()` does: it moves the staged
+   * files to `join(toUrl(dest).pathname, file)` for a local destination
+   * (`node_modules/@eyevinn/shaka-packager-s3/dist/packager.js` lines
+   * 180-184), so the package lands under the resolved pathname and not under
+   * the raw `dest` string. Returns the directory that actually holds it.
+   */
+  async function stageUpstreamUpload(dest: string): Promise<string> {
+    const uploadDir = toUrl(dest).pathname;
+    await mkdir(uploadDir, { recursive: true });
+    await writeFile(join(uploadDir, 'test3_x264_3100.mp4'), 'source rendition');
+    await writeFile(join(uploadDir, 'test3_STEREO.mp4'), 'source rendition');
+    await writeFile(join(uploadDir, 'index.m3u8'), 'playlist');
+    return uploadDir;
+  }
+
+  it('cleans the encoded directory for a destination that needs encoding', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'packaged-'));
+    const dest = join(parent, 'out dir');
+    const uploadDir = await stageUpstreamUpload(dest);
+
+    // `toUrl()` percent-encodes the space, so the package really sits in a
+    // directory whose name contains '%20' — a different path from `dest`.
+    expect(uploadDir).toEqual(join(parent, 'out%20dir'));
+    expect(uploadDir).not.toEqual(dest);
+
+    await removeInputSourcesFromOutput(dest, remoteInputs);
+
+    expect(await readdir(uploadDir)).toEqual(['index.m3u8']);
+  });
+
+  it('cleans a file:// destination, whose raw string is not a path', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'packaged-'));
+    const dest = `file://${join(parent, 'out')}`;
+    const uploadDir = await stageUpstreamUpload(dest);
+
+    expect(uploadDir).toEqual(join(parent, 'out'));
+
+    await removeInputSourcesFromOutput(dest, remoteInputs);
+
+    expect(await readdir(uploadDir)).toEqual(['index.m3u8']);
+  });
+
+  it('does nothing and runs no command for an s3: destination', async () => {
+    // `doPackage()` deletes the staged sources before `uploadPackage()` for an
+    // `s3:` destination (`dist/packager.js` lines 52-56), so they never become
+    // objects and there is nothing for this function to delete remotely.
+    const warn = jest.spyOn(logger, 'warn');
+    const info = jest.spyOn(logger, 'info');
+    const debug = jest.spyOn(logger, 'debug');
+    try {
+      await expect(
+        removeInputSourcesFromOutput('s3://a-bucket/a-prefix', remoteInputs)
+      ).resolves.toBeUndefined();
+
+      expect(spawnSync).not.toHaveBeenCalled();
+      expect(info).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+      expect(debug).toHaveBeenCalledWith(expect.stringContaining('s3:'));
+    } finally {
+      warn.mockRestore();
+      info.mockRestore();
+      debug.mockRestore();
+    }
+  });
+
+  it('warns when an expected input source is not in the output', async () => {
+    const dest = await mkdtemp(join(tmpdir(), 'packaged-'));
+    const warn = jest.spyOn(logger, 'warn');
+    try {
+      await removeInputSourcesFromOutput(dest, remoteInputs);
+
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn.mock.calls.map((call) => String(call[0]))).toEqual([
+        expect.stringContaining(join(dest, 'test3_x264_3100.mp4')),
+        expect.stringContaining(join(dest, 'test3_STEREO.mp4'))
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

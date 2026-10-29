@@ -4,14 +4,20 @@ import {
   PackageOptions,
   PackageFormatOptions
 } from '@eyevinn/shaka-packager-s3';
+// `toUrl()` is the helper the packager itself normalises `dest` with, but it is
+// not re-exported from the package root (`dist/index.d.ts` exports only
+// `Input`, `doPackage`, `PackageOptions` and `PackageFormatOptions`). The
+// package declares no `exports` map, so the module path resolves, and importing
+// the real function keeps the destination handling here from drifting away from
+// `uploadPackage()`. See `node_modules/@eyevinn/shaka-packager-s3/dist/util.js`
+// lines 15-20 (and `dist/util.d.ts` for the signature).
+import { toUrl } from '@eyevinn/shaka-packager-s3/dist/util';
 import { resolve, join } from 'node:path';
 import { PackagingConfig, StreamKeyTemplates } from './config';
 import { basename, extname } from 'node:path';
 import { Context } from '@osaas/client-core';
 import logger from './logger';
 import { SmilGenerator } from './smilGenerator';
-import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import {
   EncryptionOptions,
@@ -119,14 +125,10 @@ export class EncorePackager {
       );
     }
     if (!this.config.includeInputSources) {
-      // Only after a successful run: the copies the packager staged into the
-      // output are not part of the package. Cleanup failures are logged, not
-      // thrown, so they cannot fail an otherwise good job.
-      await removeInputSourcesFromOutput(
-        dest,
-        inputs,
-        this.config.s3EndpointUrl
-      );
+      // Only after a successful run, and only for a local destination: the
+      // packager keeps staged sources out of an S3 upload itself. Cleanup
+      // failures are logged, not thrown, so they cannot fail a good job.
+      await removeInputSourcesFromOutput(dest, inputs);
     }
     logger.info(`Finished packaging of job ${job.id} to output folder ${dest}`);
     if (URL.canParse(dest)) {
@@ -326,6 +328,17 @@ export function inputSourceFilesInOutput(inputs: Input[]): string[] {
  * Remove any input source files that were copied into the package output, so
  * the output holds only the generated segments, playlists and manifests.
  *
+ * Only a local destination needs this. For an `s3:` destination the packager
+ * already drops the staged sources *before* the upload: `doPackage()` in
+ * @eyevinn/shaka-packager-s3@0.6.3
+ * (`node_modules/@eyevinn/shaka-packager-s3/dist/packager.js` lines 52-56)
+ * runs `removeDownloadedFiles()` and only then `uploadPackage()`, and that
+ * removal resolves the staged copy as `join(stagingDir,
+ * basename(input.filename))` exactly when the filename contains `://`
+ * (`dist/packager.js` lines 161-164) — the form `resolveInputSourceUrls()`
+ * produces. The sources are therefore never uploaded, so there is no remote
+ * object to delete afterwards.
+ *
  * Generated files cannot collide with these names: segments and playlists are
  * named from the stream keys (`video-$KEY$`, `audio`) and the manifest name
  * templates, never from the Encore rendition filename.
@@ -334,45 +347,48 @@ export function inputSourceFilesInOutput(inputs: Input[]): string[] {
  */
 export async function removeInputSourcesFromOutput(
   dest: string,
-  inputs: Input[],
-  s3EndpointUrl?: string
+  inputs: Input[]
 ): Promise<void> {
   const files = inputSourceFilesInOutput(inputs);
   if (files.length === 0) {
     return;
   }
-  const isS3 = URL.canParse(dest) && new URL(dest).protocol === 's3:';
+  // Normalise `dest` the way the packager does: a string with a scheme is
+  // parsed as-is, anything else becomes `file://${resolve(dest)}`
+  // (`dist/util.js` lines 15-20).
+  const destUrl = toUrl(dest);
+  if (destUrl.protocol !== 'file:') {
+    logger.debug(
+      `Input sources need no cleanup in ${dest}: the packager removes them before uploading to a ${destUrl.protocol} destination`
+    );
+    return;
+  }
+  // `uploadPackage()` moves each staged file to `join(dest.pathname, file)`
+  // for a local destination (`dist/packager.js` lines 180-184). `toUrl()`
+  // percent-encodes the path, so the package lands under the encoded
+  // pathname, which is not the same string as a raw `dest` that needs
+  // encoding — and for a `file://` dest the raw string is no path at all.
+  const destDir = destUrl.pathname;
   for (const file of files) {
+    const path = join(destDir, file);
     try {
-      if (isS3) {
-        removeFromS3(`${dest.replace(/\/+$/, '')}/${file}`, s3EndpointUrl);
-      } else {
-        const path = join(dest, file);
-        if (existsSync(path)) {
-          await unlink(path);
-          logger.info(`Removed input source ${path} from packaged output`);
-        }
-      }
+      await unlink(path);
+      logger.info(`Removed input source ${path} from packaged output`);
     } catch (err) {
+      const { code, message } = err as NodeJS.ErrnoException;
+      if (code === 'ENOENT') {
+        // Not fatal, but it means this function and the packager disagree
+        // about where the output went, so make the miss visible.
+        logger.warn(
+          `Expected input source ${path} in the packaged output, but it was not there; nothing removed`
+        );
+        continue;
+      }
       logger.warn(
-        `Failed to remove input source ${file} from ${dest}: ${
-          (err as Error)?.message
-        }`
+        `Failed to remove input source ${file} from ${destDir}: ${message}`
       );
     }
   }
-}
-
-function removeFromS3(url: string, s3EndpointUrl?: string): void {
-  const args = ['s3', 'rm', url];
-  if (s3EndpointUrl) {
-    args.push('--endpoint-url', s3EndpointUrl);
-  }
-  const { status, error } = spawnSync('aws', args, { stdio: 'ignore' });
-  if (status !== 0) {
-    throw error ?? new Error(`aws s3 rm failed with exit code ${status}`);
-  }
-  logger.info(`Removed input source ${url} from packaged output`);
 }
 
 export function parseInputsFromEncoreJob(
