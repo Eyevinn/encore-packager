@@ -4,8 +4,9 @@ ARG NODE_IMAGE=node:26-alpine
 FROM ${NODE_IMAGE} AS without-volume-definition
 ENV NODE_ENV=production
 EXPOSE 8000
-RUN apk --no-cache add curl
-RUN apk --no-cache add aws-cli
+# Refresh the base image's Alpine packages before installing runtime tools.
+RUN apk --no-cache upgrade \
+    && apk --no-cache add curl aws-cli
 RUN mkdir /app
 RUN chown node:node /app
 USER node
