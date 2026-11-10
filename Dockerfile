@@ -1,11 +1,11 @@
-ARG NODE_IMAGE=node:26-alpine
+ARG NODE_IMAGE=node:26.12.1-alpine3.24
 
 # Note: This target is the one build by CI and published to dockerhub
 FROM ${NODE_IMAGE} AS without-volume-definition
 ENV NODE_ENV=production
 EXPOSE 8000
-RUN apk --no-cache add curl
-RUN apk --no-cache add aws-cli
+RUN apk --no-cache upgrade \
+    && apk --no-cache add 'brotli-libs>=1.2.1-r0' curl aws-cli
 RUN mkdir /app
 RUN chown node:node /app
 USER node
