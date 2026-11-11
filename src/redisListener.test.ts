@@ -254,3 +254,168 @@ describe('RedisListener message handling', () => {
     expect(JSON.parse(queued.value)).toEqual(message);
   });
 });
+
+describe('Per-job callback URL', () => {
+  it('Accepts a message with a callback URL', () => {
+    expect(() =>
+      validateQueueMessage({
+        jobId: 'id',
+        url: 'http://localhost/job',
+        callbackUrl: 'https://user:password@callback.example.com/hook'
+      })
+    ).not.toThrow();
+  });
+
+  it('Rejects a callback URL that is not an absolute http(s) URL', () => {
+    expect(() =>
+      validateQueueMessage({
+        jobId: 'id',
+        url: 'http://localhost/job',
+        callbackUrl: '/relative/hook'
+      })
+    ).toThrow(/callbackUrl/);
+    expect(() =>
+      validateQueueMessage({
+        jobId: 'id',
+        url: 'http://localhost/job',
+        callbackUrl: 'ftp://callback.example.com/hook'
+      })
+    ).toThrow(/callbackUrl/);
+  });
+
+  it('Rejects a callback URL of the wrong type', () => {
+    expect(() =>
+      validateQueueMessage({
+        jobId: 'id',
+        url: 'http://localhost/job',
+        callbackUrl: 17
+      })
+    ).toThrow(/Invalid message/);
+  });
+
+  it('Passes the callback URL through to the job handler', async () => {
+    const onMessage = jest.fn().mockResolvedValue('/out/path');
+    const listener = new RedisListener(redisConfig, onMessage, 1);
+    const message = {
+      jobId: 'id',
+      url: 'http://localhost/job',
+      callbackUrl: 'https://callback.example.com/hook'
+    };
+
+    await listener.handleMessage(JSON.stringify(message));
+
+    expect(onMessage).toHaveBeenCalledWith(message);
+  });
+
+  it('Notifies the per-job listener when the job carries a callback URL', async () => {
+    const jobDone = jest.fn();
+    const configuredDone = jest.fn();
+    const jobListener = { onPackageDone: jobDone };
+    const listener = new RedisListener(
+      redisConfig,
+      jest.fn().mockResolvedValue('/out/path'),
+      1,
+      { onPackageDone: configuredDone },
+      (message: { callbackUrl?: string }) =>
+        message.callbackUrl ? jobListener : undefined
+    );
+
+    await listener.handleMessage(
+      JSON.stringify({
+        jobId: 'id',
+        url: 'http://localhost/job',
+        callbackUrl: 'https://callback.example.com/hook'
+      })
+    );
+
+    expect(jobDone).toHaveBeenCalledWith(
+      'http://localhost/job',
+      'id',
+      '/out/path'
+    );
+    expect(configuredDone).not.toHaveBeenCalled();
+  });
+
+  it('Falls back to the configured listener when the job has no callback URL', async () => {
+    const jobDone = jest.fn();
+    const configuredDone = jest.fn();
+    const listener = new RedisListener(
+      redisConfig,
+      jest.fn().mockResolvedValue('/out/path'),
+      1,
+      { onPackageDone: configuredDone },
+      (message: { callbackUrl?: string }) =>
+        message.callbackUrl ? { onPackageDone: jobDone } : undefined
+    );
+
+    await listener.handleMessage(
+      JSON.stringify({ jobId: 'id', url: 'http://localhost/job' })
+    );
+
+    expect(configuredDone).toHaveBeenCalledWith(
+      'http://localhost/job',
+      'id',
+      '/out/path'
+    );
+    expect(jobDone).not.toHaveBeenCalled();
+  });
+
+  it('Reports failures to the per-job listener', async () => {
+    const jobFail = jest.fn();
+    const configuredFail = jest.fn();
+    const listener = new RedisListener(
+      redisConfig,
+      jest.fn().mockRejectedValue(new Error('packaging blew up')),
+      1,
+      { onPackageFail: configuredFail },
+      (message: { callbackUrl?: string }) =>
+        message.callbackUrl ? { onPackageFail: jobFail } : undefined
+    );
+
+    await listener.handleMessage(
+      JSON.stringify({
+        jobId: 'id',
+        url: 'http://localhost/job',
+        callbackUrl: 'https://callback.example.com/hook'
+      })
+    );
+
+    expect(jobFail).toHaveBeenCalled();
+    expect(configuredFail).not.toHaveBeenCalled();
+  });
+
+  it('Never logs credentials embedded in a callback URL', async () => {
+    const listener = new RedisListener(
+      redisConfig,
+      jest.fn().mockResolvedValue('/out/path'),
+      1
+    );
+    const message = {
+      jobId: 'id',
+      url: 'http://localhost/job',
+      callbackUrl: 'https://user:s3cr3t@callback.example.com/hook'
+    };
+
+    await listener.handleMessage(JSON.stringify(message));
+    await listener.retryJob(message);
+
+    expect(logged.join('\n')).not.toContain('s3cr3t');
+    expect(logged.join('\n')).toContain('[REDACTED]@callback.example.com');
+    const queued = zAdd.mock.calls[0][1] as { value: string };
+    expect(JSON.parse(queued.value)).toEqual(message);
+  });
+
+  it('Requeues a retried job with its callback URL intact', async () => {
+    const listener = new RedisListener(redisConfig, jest.fn(), 1);
+    const message = {
+      jobId: 'id',
+      url: 'http://localhost/job',
+      callbackUrl: 'https://callback.example.com/hook'
+    };
+
+    await listener.retryJob(message);
+
+    const queued = zAdd.mock.calls[0][1] as { value: string };
+    expect(JSON.parse(queued.value)).toEqual(message);
+  });
+});

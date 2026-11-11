@@ -1,10 +1,13 @@
 import api from './api';
-import { RedisListener } from './redisListener';
+import { QueueMessage, RedisListener } from './redisListener';
 import { EncorePackager } from './encorePackager';
 import { Config } from './config';
 import { PackageListener } from './packageListener';
 import logger from './logger';
-import { CallbackListener } from './callbackListener';
+import {
+  createCallbackListener,
+  createJobCallbackListener
+} from './callbackListener';
 
 async function loadPackageListener(
   pluginPath: string | undefined
@@ -27,18 +30,33 @@ async function loadPackageListener(
 }
 
 export async function startListener(config: Config) {
-  let packageListener = await loadPackageListener(
+  const pluginListener = await loadPackageListener(
     config.packaging.packageListenerPlugin
   );
 
-  if (!packageListener && config.callback.url) {
-    packageListener = new CallbackListener(
-      config.callback.url,
-      config.callback.user,
-      config.callback.password,
+  const packageListener =
+    pluginListener ??
+    createCallbackListener(config.callback, config.packaging.oscAccessToken);
+
+  // A job may carry its own callbackUrl, which is used for that job instead of
+  // the configured CALLBACK_URL. A job without one keeps the configured
+  // callback. A listener plugin stays in charge of every job, as before, since
+  // it can do work a callback cannot replace.
+  const packageListenerFor = (message: QueueMessage) => {
+    if (!message.callbackUrl) {
+      return undefined;
+    }
+    if (pluginListener) {
+      logger.warn(
+        `Ignoring callbackUrl on job ${message.jobId}: a package listener plugin is configured for this instance`
+      );
+      return undefined;
+    }
+    return createJobCallbackListener(
+      message.callbackUrl,
       config.packaging.oscAccessToken
     );
-  }
+  };
 
   const encorePackager = new EncorePackager(config.packaging);
   logger.info('Starting redis listener');
@@ -55,7 +73,8 @@ export async function startListener(config: Config) {
       }
     },
     config.packaging.concurrency,
-    packageListener
+    packageListener,
+    packageListenerFor
   );
   redisListener.start();
 
