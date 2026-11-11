@@ -67,11 +67,46 @@ When running as a service, the packager can be configured to use skip packaging 
 
 ```bash
 # Standard packaging mode (default)
-npm run start
+npm run start -- -r
 
 # Skip packaging mode for all jobs
-SKIP_PACKAGING=true npm run start
+SKIP_PACKAGING=true npm run start -- -r
 ```
+
+#### Queue name
+
+The name of the queue to listen to is set with the `REDIS_QUEUE` environment
+variable (see the environment variable table below for its default). The name is
+used exactly as given, with no prefix or namespace added. The server itself is
+selected separately with `REDIS_URL`, and setting `REDIS_CLUSTER=true` connects
+to it as a cluster root node instead of a single server.
+
+```bash
+REDIS_QUEUE=my-packaging-queue npm run start -- -r
+```
+
+An instance listens to exactly one queue, read from the environment at startup.
+There is no filtering or routing of messages within a queue: every message the
+packager pops is processed. Separating work therefore means running one instance
+per queue, and having whatever produces the messages choose which queue to add
+to.
+
+The queue is a redis **sorted set**, not a list. The packager pops the member
+with the lowest score using `BZPOPMIN`, so producers add jobs with `ZADD` and
+can use the score to order them:
+
+```bash
+redis-cli ZADD packaging-queue 1 '{"jobId":"e5e76304-744c-41d6-85f7-69007b3b1a65","url":"http://encore:8080/encoreJobs/e5e76304-744c-41d6-85f7-69007b3b1a65"}'
+```
+
+The pop is blocking. The listener calls `BZPOPMIN` with a timeout argument of
+`2000`, and redis reads that argument as seconds, so an idle listener stays
+blocked on the queue for up to roughly 33 minutes before the loop comes round
+and waits again.
+
+Nothing in this package adds jobs to the queue apart from the retry endpoint,
+which re-adds a job with the current timestamp as its score. Producing the
+initial job messages is up to whatever triggers packaging.
 
 #### Queue message format
 
@@ -162,11 +197,11 @@ encryption or when the instance runs with `SKIP_PACKAGING=true`.
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
 | `REDIS_URL`                   | URL to the redis server                                                                                                                                                                                                               | `redis://localhost:6379` |
 | `REDIS_QUEUE`                 | Name of the redis queue to listen to                                                                                                                                                                                                  | `packaging-queue`        |
-| `HOST`                        | Hostname or IP address to bind to for healtchechk endpoint                                                                                                                                                                            | `0.0.0.0`                |
-| `PORT`                        | Port to bind to for healtchechk endpoint                                                                                                                                                                                              | `8000`                   |
-| `DISABLE_HEALTCHECK`          | Disable the healthcheck endpoint                                                                                                                                                                                                      | `false`                  |
+| `HOST`                        | Hostname or IP address to bind to for healthcheck endpoint                                                                                                                                                                            | `0.0.0.0`                |
+| `PORT`                        | Port to bind to for healthcheck endpoint                                                                                                                                                                                              | `8000`                   |
+| `DISABLE_HEALTHCHECK`         | Disable the healthcheck endpoint                                                                                                                                                                                                      | `false`                  |
 | `SHAKA_PACKAGER_EXECUTABLE`   | Path to the shaka packager executable                                                                                                                                                                                                 | `packager`               |
-| `PACKAGE_OUTPUT_FOLDER`       | Base folder for output, actual output will be in a subfolder according to `OUTPUT_SUBFOLDER_TEMPLATE`                                                                                                                                 | `packaged`               |
+| `PACKAGE_OUTPUT_FOLDER`       | Base folder for output, actual output will be in a subfolder according to `OUTPUT_SUBFOLDER_TEMPLATE`. A trailing `/` is optional, it is added when missing                                                                           | `packaged`               |
 | `PACKAGE_CONCURRENCY`         | Number of concurrent packaging jobs                                                                                                                                                                                                   | `1`                      |
 | `PACKAGE_LISTENER_PLUGIN`     | Optional path to a javascript file containing a custom listener for packaging event, see below                                                                                                                                        |                          |
 | `PACKAGE_FORMAT_OPTIONS_JSON` | Optional JSON string with format options for shaka packager, format as defined in https://github.com/Eyevinn/shaka-packager-s3/blob/main/src/packager.ts                                                                              |
@@ -180,9 +215,16 @@ encryption or when the instance runs with `SKIP_PACKAGING=true`.
 | `AWS_ACCESS_KEY_ID`           | Optional AWS access key id when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                                                                                                                                                           |                          |
 | `AWS_SECRET_ACCESS_KEY`       | Optional AWS secret access key when `PACKAGE_OUTPUT_FOLDER` is an AWS S3 bucket                                                                                                                                                       |                          |
 | `S3_ENDPOINT_URL`             | Optional S3 Endpoint URL when `PACKAGE_OUTPUT_FOLDER` is an S3 bucket not on AWS                                                                                                                                                      |                          |
-| `CALLBACK_URL`                | Optional callback service url. If enabled, the packager will send callbacks on packaging success or failure. To use baisc auth, provide the URL in the format `https://user:password@hostname/path`. Used if job has no `callbackUrl` |                          |
+| `CALLBACK_URL`                | Optional callback service url. If enabled, the packager will send callbacks on packaging success or failure. To use basic auth, provide the URL in the format `https://user:password@hostname/path`. Used if job has no `callbackUrl` |                          |
 | `SKIP_PACKAGING`              | Skip Shaka Packager and copy MP4 files with SMIL generation instead. Set to `true` to enable                                                                                                                                          | `false`                  |
 | `SMIL_BASE_URL`               | Optional base URL to include in generated SMIL files. Used for resolving relative video file paths                                                                                                                                    |                          |
+| `INCLUDE_INPUT_SOURCES`       | Keep the input source files (the Encore output renditions the packager reads) in the packaged output. By default the output contains only the generated segments, playlists and manifests. Set to `true` to enable                    | `false`                  |
+
+##### Packaged output contents
+
+The packaged output contains the generated segments, playlists and manifests. The input sources, meaning the Encore output renditions that Shaka Packager reads, are not part of the package and are removed from the output. Set `INCLUDE_INPUT_SOURCES=true` to keep them.
+
+This does not apply to skip packaging mode (`SKIP_PACKAGING=true`), where the MP4 files and the generated SMIL file are the output.
 
 ##### Stream key templates
 
@@ -238,7 +280,7 @@ The SMIL file includes:
 #### Starting the service
 
 ```bash
-npm run start
+npm run start -- -r
 ```
 
 ### Custom packager listener
