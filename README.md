@@ -283,6 +283,26 @@ The SMIL file includes:
 npm run start -- -r
 ```
 
+#### Callback payloads
+
+When a callback URL is configured (`CALLBACK_URL`, or `callbackUrl` on the queue message), the
+packager POSTs to two paths under it:
+
+- `<callback>/packagerCallback/success` — `{ "url", "jobId", "outputPath"? }`
+- `<callback>/packagerCallback/failure` — `{ "message", "reason" }`
+
+`reason` names the class of failure, so a consumer can react to it without parsing `message`:
+
+| `reason`              | Meaning                                                                  |
+| --------------------- | ------------------------------------------------------------------------ |
+| `unsupported_media`   | The media could not be parsed: unreadable container or codec             |
+| `invalid_credentials` | A credential the packager was given was rejected; retrying will not help |
+| `packaging_failed`    | Catch-all: packaging failed with no class the packager could name        |
+
+`message` is free text and may change between releases; `reason` is the stable field. It is
+derived from the error alone and never carries any part of it, so no job URL, hostname or
+credential reaches the consumer through it.
+
 ### Custom packager listener
 
 To implement a custom listener that reacts to package events, provide a path to a javascript file
